@@ -1,0 +1,8 @@
+# Vendored at build time — see plugin-update-checker/README-VENDOR.md
+plugin-update-checker/*
+!plugin-update-checker/README-VENDOR.md
+
+.DS_Store
+node_modules/
+vendor/
+*.zip

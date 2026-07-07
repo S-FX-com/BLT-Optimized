@@ -1,0 +1,227 @@
+/* BLT Optimized admin styles */
+
+.blt-optimized-wrap .blt-toolbar {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	margin: 12px 0;
+}
+
+.blt-progress {
+	font-style: italic;
+	color: #555;
+}
+
+/* Summary cards */
+.blt-cards {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 12px;
+	margin: 16px 0;
+}
+
+.blt-card {
+	background: #fff;
+	border: 1px solid #c3c4c7;
+	border-radius: 4px;
+	padding: 12px 16px;
+	min-width: 150px;
+	display: flex;
+	flex-direction: column;
+	gap: 4px;
+}
+
+.blt-card-label {
+	color: #646970;
+	font-size: 12px;
+	text-transform: uppercase;
+	letter-spacing: 0.03em;
+}
+
+.blt-card-value {
+	font-size: 18px;
+	font-weight: 600;
+}
+
+/* Layout */
+.blt-columns {
+	display: flex;
+	gap: 24px;
+	align-items: flex-start;
+}
+
+.blt-col-main {
+	flex: 2;
+	min-width: 0;
+}
+
+.blt-col-side {
+	flex: 1;
+	min-width: 280px;
+}
+
+/* Folder tree */
+.blt-tree {
+	background: #fff;
+	border: 1px solid #c3c4c7;
+	border-radius: 4px;
+	padding: 8px 12px;
+	overflow-x: auto;
+}
+
+.blt-node-row {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	padding: 3px 0;
+	border-bottom: 1px solid #f0f0f1;
+	font-size: 13px;
+}
+
+.blt-toggle {
+	background: none;
+	border: none;
+	cursor: pointer;
+	width: 18px;
+	padding: 0;
+	color: #2271b1;
+	font-size: 12px;
+}
+
+.blt-toggle-empty {
+	display: inline-block;
+	width: 18px;
+}
+
+.blt-node-name {
+	font-weight: 500;
+	white-space: nowrap;
+}
+
+.blt-node-name.blt-is-file {
+	font-weight: 400;
+	font-style: italic;
+}
+
+.blt-node-flags {
+	flex: 1;
+	min-width: 0;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.blt-node-files {
+	color: #646970;
+	font-size: 12px;
+	white-space: nowrap;
+}
+
+.blt-node-size {
+	font-variant-numeric: tabular-nums;
+	font-weight: 600;
+	min-width: 72px;
+	text-align: right;
+	white-space: nowrap;
+}
+
+.blt-bar {
+	width: 120px;
+	height: 8px;
+	background: #f0f0f1;
+	border-radius: 4px;
+	overflow: hidden;
+	flex-shrink: 0;
+}
+
+.blt-bar-fill {
+	display: block;
+	height: 100%;
+	background: #2271b1;
+	border-radius: 4px;
+}
+
+/* Flags */
+.blt-flag {
+	display: inline-block;
+	background: #fcf0f1;
+	border: 1px solid #d63638;
+	color: #d63638;
+	border-radius: 3px;
+	font-size: 11px;
+	line-height: 1.6;
+	padding: 0 6px;
+	max-width: 320px;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+	vertical-align: middle;
+}
+
+.blt-flag-warn {
+	background: #fcf9e8;
+	border-color: #dba617;
+	color: #996800;
+}
+
+/* Top hogs */
+.blt-hogs {
+	background: #fff;
+	border: 1px solid #c3c4c7;
+	border-radius: 4px;
+	padding: 8px 12px 8px 32px;
+	margin: 0;
+}
+
+.blt-hogs li {
+	padding: 4px 0;
+	border-bottom: 1px solid #f0f0f1;
+	font-size: 13px;
+	word-break: break-all;
+}
+
+.blt-hog-size {
+	font-weight: 600;
+	font-variant-numeric: tabular-nums;
+}
+
+.blt-hog-path {
+	color: #3c434a;
+}
+
+/* Cleanup */
+.blt-cleanup-item {
+	background: #fff;
+	border: 1px solid #c3c4c7;
+	border-radius: 4px;
+	padding: 12px 16px;
+	margin-bottom: 12px;
+}
+
+.blt-cleanup-head {
+	display: flex;
+	align-items: center;
+	gap: 12px;
+}
+
+.blt-cleanup-head strong {
+	font-size: 14px;
+}
+
+.blt-cleanup-count {
+	color: #646970;
+	font-variant-numeric: tabular-nums;
+}
+
+.blt-cleanup-head .blt-cleanup-run {
+	margin-left: auto;
+}
+
+.blt-cleanup-table {
+	margin-top: 8px;
+}
+
+.blt-success {
+	color: #00a32a;
+	font-weight: 600;
+}

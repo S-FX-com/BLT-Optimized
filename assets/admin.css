@@ -93,6 +93,14 @@
 	width: 18px;
 }
 
+.blt-node-row-expandable {
+	cursor: pointer;
+}
+
+.blt-node-row-expandable:hover {
+	background: #f6f7f7;
+}
+
 .blt-node-name {
 	font-weight: 500;
 	white-space: nowrap;
@@ -224,4 +232,81 @@
 .blt-success {
 	color: #00a32a;
 	font-weight: 600;
+	margin: 4px 0 0;
+}
+
+/* Shared tab navigation */
+.blt-nav-tabs {
+	margin-bottom: 16px;
+}
+
+/* Cleanup toolbar (Advanced DB Cleaner-style bulk actions) */
+.blt-cleanup-toolbar .blt-bulk-action {
+	min-width: 140px;
+}
+
+/* Advanced DB Cleaner-style cleanup list table */
+.blt-adbc-table {
+	margin-top: 8px;
+}
+
+.blt-adbc-table thead td.check-column,
+.blt-adbc-table tbody th.check-column {
+	width: 2.2em;
+	vertical-align: middle;
+}
+
+.blt-adbc-table .blt-col-count,
+.blt-adbc-table .blt-col-size {
+	width: 90px;
+	font-variant-numeric: tabular-nums;
+}
+
+.blt-adbc-table .blt-col-view {
+	width: 48px;
+	text-align: center;
+}
+
+.blt-adbc-table .blt-col-action {
+	width: 220px;
+}
+
+.blt-adbc-label {
+	display: block;
+	font-weight: 600;
+	font-size: 14px;
+}
+
+.blt-adbc-desc {
+	display: block;
+	color: #646970;
+	font-size: 12px;
+	margin-top: 2px;
+}
+
+.blt-adbc-count {
+	font-weight: 600;
+}
+
+.blt-adbc-count-hot {
+	color: #d63638;
+}
+
+.blt-adbc-clean {
+	color: #00a32a;
+}
+
+.blt-adbc-view {
+	cursor: pointer;
+	font-size: 16px;
+	line-height: 1;
+	text-decoration: none;
+}
+
+.blt-adbc-detail > td {
+	background: #f6f7f7;
+}
+
+.blt-adbc-detail .blt-cleanup-table {
+	margin: 8px 0;
 }

@@ -162,6 +162,8 @@ final class BLT_Optimized {
 			'revision_retention' => 5,
 			'trash_age_days'     => 30,
 			'exclusions'         => '',
+			'show_top_menu'      => 1, // Top-level admin menu.
+			'show_tools_menu'    => 0, // Entry under the Tools menu.
 		);
 		$settings = get_option( self::OPTION_SETTINGS, array() );
 		return wp_parse_args( is_array( $settings ) ? $settings : array(), $defaults );

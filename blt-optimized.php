@@ -2,8 +2,8 @@
 /**
  * Plugin Name:       BLT Optimized
  * Plugin URI:        https://github.com/S-FX-com/BLT-Optimized
- * Description:       Disk-usage forensics and database optimization for WordPress. Folder-by-folder wp-content size breakdown, orphaned data cleanup, and table optimization — standalone, zero external dependency.
- * Version:           1.0.2
+ * Description:       Disk-usage forensics and database optimization for WordPress — folder-by-folder wp-content size breakdown, orphaned data cleanup, and table optimization. Includes an optional image-optimization module (compress + WebP via a self-hosted Cloudflare Worker). Disk/DB core is standalone with zero external dependency.
+ * Version:           1.1.0
  * Requires at least: 6.0
  * Requires PHP:      8.0
  * Author:            S-FX.com Small Business Solutions
@@ -17,7 +17,7 @@
 
 defined( 'ABSPATH' ) || exit;
 
-define( 'BLT_OPTIMIZED_VERSION', '1.0.2' );
+define( 'BLT_OPTIMIZED_VERSION', '1.1.0' );
 define( 'BLT_OPTIMIZED_FILE', __FILE__ );
 define( 'BLT_OPTIMIZED_DIR', plugin_dir_path( __FILE__ ) );
 define( 'BLT_OPTIMIZED_URL', plugin_dir_url( __FILE__ ) );
@@ -27,6 +27,54 @@ require_once BLT_OPTIMIZED_DIR . 'includes/class-blt-optimized-scanner.php';
 require_once BLT_OPTIMIZED_DIR . 'includes/class-blt-optimized-cleaner.php';
 require_once BLT_OPTIMIZED_DIR . 'includes/class-blt-optimized-db-optimizer.php';
 require_once BLT_OPTIMIZED_DIR . 'includes/class-blt-optimized-admin.php';
+
+/**
+ * Image-optimization module (optional).
+ *
+ * The module was originally the standalone "Blt Image Optimizer" plugin. It is
+ * self-contained under the BltImageOptimizer namespace and is only booted when
+ * the `enable_images` setting is on (see BLT_Optimized::boot_images()), so the
+ * disk/DB core keeps its zero-external-dependency guarantee when the module is
+ * off. Its classes reuse the BLT_OPTIMIZER_* constants below (aliases of the
+ * base plugin's constants) so the ported code needs no path rewrites.
+ */
+define( 'BLT_OPTIMIZER_VERSION', BLT_OPTIMIZED_VERSION );
+define( 'BLT_OPTIMIZER_DIR', BLT_OPTIMIZED_DIR );
+define( 'BLT_OPTIMIZER_URL', BLT_OPTIMIZED_URL );
+define( 'BLT_OPTIMIZER_FILE', BLT_OPTIMIZED_FILE );
+define( 'BLT_OPTIMIZER_BASENAME', plugin_basename( BLT_OPTIMIZED_FILE ) );
+
+/**
+ * Autoloader for the BltImageOptimizer namespace.
+ *
+ * Maps BltImageOptimizer\Foo_Bar to includes/images/class-blt-foo-bar.php,
+ * falling back to admin/images/. Only the image module uses this namespace;
+ * the disk/DB core is un-namespaced and loaded via the require_once calls above.
+ */
+spl_autoload_register(
+	function ( $class ) {
+		$prefix = 'BltImageOptimizer\\';
+		if ( 0 !== strpos( $class, $prefix ) ) {
+			return;
+		}
+
+		$relative = substr( $class, strlen( $prefix ) );
+		$relative = strtolower( str_replace( '_', '-', $relative ) );
+		$file     = 'class-blt-' . $relative . '.php';
+
+		$candidates = array(
+			BLT_OPTIMIZED_DIR . 'includes/images/' . $file,
+			BLT_OPTIMIZED_DIR . 'admin/images/' . $file,
+		);
+
+		foreach ( $candidates as $path ) {
+			if ( is_readable( $path ) ) {
+				require_once $path;
+				return;
+			}
+		}
+	}
+);
 
 /**
  * Plugin update checker (YahnisElsts/plugin-update-checker, v5.x).
@@ -122,6 +170,67 @@ final class BLT_Optimized {
 		add_action( 'blt_optimized_scheduled_scan', array( $this->scanner, 'run_scheduled_scan' ) );
 		add_action( 'blt_optimized_scan_tick_event', array( $this->scanner, 'background_tick' ) );
 		add_action( 'update_option_' . self::OPTION_SETTINGS, array( $this, 'reschedule_scan' ), 10, 2 );
+		add_action( 'update_option_' . self::OPTION_SETTINGS, array( $this, 'maybe_setup_images' ), 10, 2 );
+
+		$this->boot_images();
+	}
+
+	/**
+	 * Boot the optional image-optimization module when enabled.
+	 *
+	 * The module (BltImageOptimizer\Core / \Admin) wires its own upload,
+	 * bulk-queue, URL-rewrite, and admin hooks. Kept behind the `enable_images`
+	 * setting so the disk/DB core stays standalone when the module is off.
+	 *
+	 * @return void
+	 */
+	private function boot_images() {
+		$settings = self::get_settings();
+		if ( empty( $settings['enable_images'] ) ) {
+			return;
+		}
+
+		if ( ! class_exists( '\\BltImageOptimizer\\Core' ) ) {
+			return;
+		}
+
+		\BltImageOptimizer\Core::instance()->init();
+
+		if ( is_admin() && class_exists( '\\BltImageOptimizer\\Admin' ) ) {
+			\BltImageOptimizer\Admin::instance()->init();
+		}
+	}
+
+	/**
+	 * Create the image module's table + default settings the first time the
+	 * module is switched on (activation may have run while it was off).
+	 *
+	 * @param mixed $old_value Previous settings.
+	 * @param mixed $value     New settings.
+	 * @return void
+	 */
+	public function maybe_setup_images( $old_value, $value ) {
+		$was_on = is_array( $old_value ) && ! empty( $old_value['enable_images'] );
+		$now_on = is_array( $value ) && ! empty( $value['enable_images'] );
+
+		if ( $now_on && ! $was_on ) {
+			self::install_images();
+		}
+	}
+
+	/**
+	 * Install the image module's storage (log table + seeded settings).
+	 * Idempotent — safe to call whenever the module becomes active.
+	 *
+	 * @return void
+	 */
+	public static function install_images() {
+		if ( class_exists( '\\BltImageOptimizer\\Logger' ) ) {
+			\BltImageOptimizer\Logger::install();
+		}
+		if ( class_exists( '\\BltImageOptimizer\\Settings' ) ) {
+			\BltImageOptimizer\Settings::seed_defaults();
+		}
 	}
 
 	/**
@@ -164,6 +273,7 @@ final class BLT_Optimized {
 			'exclusions'         => '',
 			'show_top_menu'      => 1, // Top-level admin menu.
 			'show_tools_menu'    => 0, // Entry under the Tools menu.
+			'enable_images'      => 0, // Optional image-optimization module (off by default).
 		);
 		$settings = get_option( self::OPTION_SETTINGS, array() );
 		return wp_parse_args( is_array( $settings ) ? $settings : array(), $defaults );
@@ -217,6 +327,13 @@ final class BLT_Optimized {
 		add_option( self::OPTION_SETTINGS, self::get_settings() );
 		add_option( 'blt_optimized_db_version', BLT_OPTIMIZED_VERSION );
 
+		// If the image module is already enabled (e.g. re-activation after a
+		// previous toggle), ensure its storage exists. When off, nothing image
+		// related is created — the disk/DB core stays standalone.
+		if ( ! empty( self::get_settings()['enable_images'] ) ) {
+			self::install_images();
+		}
+
 		self::schedule_scan_event( self::get_settings() );
 	}
 
@@ -229,6 +346,9 @@ final class BLT_Optimized {
 		if ( function_exists( 'as_unschedule_all_actions' ) ) {
 			as_unschedule_all_actions( 'blt_optimized_scan_tick_event' );
 			as_unschedule_all_actions( 'blt_optimized_scheduled_scan' );
+			// Image module bulk queue.
+			as_unschedule_all_actions( 'blt_optimizer_process_batch' );
+			as_unschedule_all_actions( 'blt_optimizer_process_single' );
 		}
 	}
 

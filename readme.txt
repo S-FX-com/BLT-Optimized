@@ -1,10 +1,10 @@
 === BLT Optimized ===
 Contributors: sfxcom
-Tags: disk usage, database optimization, cleanup, orphaned data, autoload
+Tags: disk usage, database optimization, cleanup, orphaned data, autoload, webp, image optimization
 Requires at least: 6.0
 Tested up to: 6.8
 Requires PHP: 8.0
-Stable tag: 1.0.2
+Stable tag: 1.1.0
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -42,6 +42,16 @@ Safety guardrails:
 
 Works standalone with zero external dependency.
 
+= Optional: image optimization =
+
+BLT Optimized also ships an **optional image-optimization module** (off by default) that permanently optimizes images on disk — compression + WebP conversion — by routing them through a self-hosted Cloudflare Worker:
+
+* Auto-optimizes new uploads and bulk-processes the existing media library (Action Scheduler queue with pause/resume/cancel)
+* Writes optimized `.webp` files next to the originals and rewrites front-end URLs/srcset to serve them (Bricks Builder aware)
+* Once optimized, images are just files on disk — the module, and the Worker, can be turned off with no image regression (agency hand-off model)
+
+Enable it under **BLT Optimized → Settings → Image optimization**. It requires a Cloudflare Worker deployed to a real **zone route** (not a `*.workers.dev` subdomain — `cf.image` transforms are unavailable there); configure the Worker URL and shared secret under **Image Settings**, and use **Test Connection** to confirm the Worker reports `cf.image` availability. When the module is left off, the disk/DB core remains fully standalone with zero external dependency.
+
 == Installation ==
 
 1. Upload the `blt-optimized` folder to `/wp-content/plugins/`.
@@ -63,6 +73,11 @@ Yes. The scanner feature-detects exec()/du and falls back to a pure-PHP recursiv
 Scans run in time-boxed batches and the partial state is persisted between ticks, so a scan resumes after a timeout, deploy, or server restart without starting over.
 
 == Changelog ==
+
+= 1.1.0 =
+* New optional image-optimization module (merged in from the former standalone Blt Image Optimizer plugin): compress + WebP conversion via a self-hosted Cloudflare Worker, auto-optimize on upload, bulk runner, and front-end WebP URL/srcset rewriting.
+* The module is off by default and toggled under Settings → Image optimization; the disk/DB core stays standalone with zero external dependency when it is off.
+* Bundled the image Cloudflare Worker under `worker/` for deployment.
 
 = 1.0.1 =
 * Disk Usage: the whole folder row is now clickable to expand, not just the small caret.

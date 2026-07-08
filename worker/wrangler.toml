@@ -1,0 +1,27 @@
+# Wrangler configuration for the Blt Image Optimizer Worker.
+#
+# IMPORTANT: cf.image transformations require deployment to a Cloudflare ZONE
+# ROUTE with Image Transformations enabled — NOT a *.workers.dev subdomain.
+# Configure the `route` below to a hostname on a zone in the S-FX account.
+
+name = "blt-image-optimizer"
+main = "src/index.ts"
+compatibility_date = "2026-05-30"
+workers_dev = false
+
+# Deploy to a real zone route so cf.image works. Replace with the S-FX zone.
+# Example:
+#   route = { pattern = "img-optimizer.s-fx.com/*", zone_name = "s-fx.com" }
+[[routes]]
+pattern = "img-optimizer.s-fx.com/*"
+zone_name = "s-fx.com"
+
+# WORKER_SECRET is a SECRET, not a plaintext var. Set it with:
+#   wrangler secret put WORKER_SECRET
+# Do NOT commit the secret value here.
+
+[observability]
+enabled = true
+
+[placement]
+mode = "smart"

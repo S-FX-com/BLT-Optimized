@@ -64,5 +64,11 @@ Scans run in time-boxed batches and the partial state is persisted between ticks
 
 == Changelog ==
 
+= 1.0.1 =
+* Disk Usage: the whole folder row is now clickable to expand, not just the small caret.
+* Disk Usage: added a "Top 20 largest files" panel alongside the top space hogs.
+* Database Cleanup: reworked the previews into a bulk-action list table with per-row counts, sizes, and a details view.
+* Settings: the plugin can now be shown as a top-level menu, under the Tools menu, or both.
+
 = 1.0.0 =
 * Initial release: disk usage scanner, orphaned data cleanup, database optimization, audit log.

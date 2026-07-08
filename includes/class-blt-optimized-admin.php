@@ -59,23 +59,94 @@ class BLT_Optimized_Admin {
 	/* ------------------------------------------------------------------ */
 
 	/**
-	 * Register the admin menu.
+	 * The plugin's pages, in tab order: slug => [ label, renderer method ].
+	 *
+	 * @return array
+	 */
+	private function pages() {
+		return array(
+			'blt-optimized'          => array( __( 'Disk Usage', 'blt-optimized' ), 'render_scan_page' ),
+			'blt-optimized-cleanup'  => array( __( 'Database Cleanup', 'blt-optimized' ), 'render_cleanup_page' ),
+			'blt-optimized-db'       => array( __( 'Optimization', 'blt-optimized' ), 'render_db_page' ),
+			'blt-optimized-audit'    => array( __( 'Audit Log', 'blt-optimized' ), 'render_audit_page' ),
+			'blt-optimized-settings' => array( __( 'Settings', 'blt-optimized' ), 'render_settings_page' ),
+		);
+	}
+
+	/**
+	 * Register the admin menu. The plugin can live as its own top-level menu,
+	 * under the Tools menu, or both — controlled from Settings. When only the
+	 * Tools entry is shown, the sub-pages are registered as hidden-but-loadable
+	 * pages and reached through the in-page tab navigation.
 	 */
 	public function register_menu() {
-		add_menu_page(
-			__( 'BLT Optimized', 'blt-optimized' ),
-			__( 'BLT Optimized', 'blt-optimized' ),
-			self::CAPABILITY,
-			'blt-optimized',
-			array( $this, 'render_scan_page' ),
-			'dashicons-chart-pie',
-			81
-		);
-		add_submenu_page( 'blt-optimized', __( 'Disk Usage', 'blt-optimized' ), __( 'Disk Usage', 'blt-optimized' ), self::CAPABILITY, 'blt-optimized', array( $this, 'render_scan_page' ) );
-		add_submenu_page( 'blt-optimized', __( 'Database Cleanup', 'blt-optimized' ), __( 'Database Cleanup', 'blt-optimized' ), self::CAPABILITY, 'blt-optimized-cleanup', array( $this, 'render_cleanup_page' ) );
-		add_submenu_page( 'blt-optimized', __( 'Optimization', 'blt-optimized' ), __( 'Optimization', 'blt-optimized' ), self::CAPABILITY, 'blt-optimized-db', array( $this, 'render_db_page' ) );
-		add_submenu_page( 'blt-optimized', __( 'Audit Log', 'blt-optimized' ), __( 'Audit Log', 'blt-optimized' ), self::CAPABILITY, 'blt-optimized-audit', array( $this, 'render_audit_page' ) );
-		add_submenu_page( 'blt-optimized', __( 'Settings', 'blt-optimized' ), __( 'Settings', 'blt-optimized' ), self::CAPABILITY, 'blt-optimized-settings', array( $this, 'render_settings_page' ) );
+		$settings   = BLT_Optimized::get_settings();
+		$show_top   = ! empty( $settings['show_top_menu'] );
+		$show_tools = ! empty( $settings['show_tools_menu'] );
+
+		// Never leave the user with no way to reach the plugin.
+		if ( ! $show_top && ! $show_tools ) {
+			$show_top = true;
+		}
+
+		$pages = $this->pages();
+
+		if ( $show_top ) {
+			add_menu_page(
+				__( 'BLT Optimized', 'blt-optimized' ),
+				__( 'BLT Optimized', 'blt-optimized' ),
+				self::CAPABILITY,
+				'blt-optimized',
+				array( $this, 'render_scan_page' ),
+				'dashicons-chart-pie',
+				81
+			);
+			foreach ( $pages as $slug => $page ) {
+				add_submenu_page( 'blt-optimized', $page[0], $page[0], self::CAPABILITY, $slug, array( $this, $page[1] ) );
+			}
+		}
+
+		if ( $show_tools ) {
+			// One entry under Tools opens the tabbed interface.
+			add_management_page(
+				__( 'BLT Optimized', 'blt-optimized' ),
+				__( 'BLT Optimized', 'blt-optimized' ),
+				self::CAPABILITY,
+				'blt-optimized',
+				array( $this, 'render_scan_page' )
+			);
+
+			// If the top-level menu isn't shown, the remaining pages still need
+			// to be registered so they load; keep them out of every menu.
+			if ( ! $show_top ) {
+				foreach ( $pages as $slug => $page ) {
+					if ( 'blt-optimized' === $slug ) {
+						continue;
+					}
+					add_submenu_page( '', $page[0], $page[0], self::CAPABILITY, $slug, array( $this, $page[1] ) );
+				}
+			}
+		}
+	}
+
+	/**
+	 * Render the shared tab navigation used across every plugin page.
+	 *
+	 * @param string $current Slug of the active page.
+	 */
+	private function render_nav_tabs( $current ) {
+		echo '<nav class="nav-tab-wrapper blt-nav-tabs">';
+		foreach ( $this->pages() as $slug => $page ) {
+			$url    = menu_page_url( $slug, false );
+			$active = ( $slug === $current ) ? ' nav-tab-active' : '';
+			printf(
+				'<a href="%1$s" class="nav-tab%2$s">%3$s</a>',
+				esc_url( $url ),
+				esc_attr( $active ),
+				esc_html( $page[0] )
+			);
+		}
+		echo '</nav>';
 	}
 
 	/**
@@ -153,6 +224,15 @@ class BLT_Optimized_Admin {
 			$clean['exclusions'] = sanitize_textarea_field( $input['exclusions'] );
 		}
 
+		// Menu location toggles are checkboxes: present means on.
+		$clean['show_top_menu']   = empty( $input['show_top_menu'] ) ? 0 : 1;
+		$clean['show_tools_menu'] = empty( $input['show_tools_menu'] ) ? 0 : 1;
+
+		// Guarantee the plugin stays reachable from at least one menu.
+		if ( ! $clean['show_top_menu'] && ! $clean['show_tools_menu'] ) {
+			$clean['show_top_menu'] = 1;
+		}
+
 		return $clean;
 	}
 
@@ -220,6 +300,16 @@ class BLT_Optimized_Admin {
 				'summary'  => $scanner->get_last_scan(),
 				'rows'     => array_map( array( $this, 'format_row' ), $scanner->get_results() ),
 				'topHogs'  => array_map( array( $this, 'format_row' ), $scanner->get_top_hogs( 20 ) ),
+				'topFiles' => array_map(
+					static function ( $file ) {
+						return array(
+							'path'       => $file['path'],
+							'bytes'      => (int) $file['bytes'],
+							'bytesHuman' => size_format( (int) $file['bytes'] ),
+						);
+					},
+					$scanner->get_top_files( 20 )
+				),
 				'labels'   => $this->flag_labels(),
 			)
 		);
@@ -497,6 +587,7 @@ class BLT_Optimized_Admin {
 		?>
 		<div class="wrap blt-optimized-wrap">
 			<h1><?php esc_html_e( 'BLT Optimized — Disk Usage', 'blt-optimized' ); ?></h1>
+			<?php $this->render_nav_tabs( 'blt-optimized' ); ?>
 			<p class="description">
 				<?php esc_html_e( 'Folder-by-folder breakdown of wp-content, with known space hogs flagged. wp-admin and wp-includes are reported as single reference figures.', 'blt-optimized' ); ?>
 				<?php if ( $du ) : ?>
@@ -525,6 +616,10 @@ class BLT_Optimized_Admin {
 				<div class="blt-col-side">
 					<h2><?php esc_html_e( 'Top 20 space hogs', 'blt-optimized' ); ?></h2>
 					<div id="blt-top-hogs"></div>
+
+					<h2><?php esc_html_e( 'Top 20 largest files', 'blt-optimized' ); ?></h2>
+					<p class="description"><?php esc_html_e( 'The single biggest individual files found during the scan — regardless of folder.', 'blt-optimized' ); ?></p>
+					<div id="blt-top-files"></div>
 				</div>
 			</div>
 		</div>
@@ -538,8 +633,14 @@ class BLT_Optimized_Admin {
 		?>
 		<div class="wrap blt-optimized-wrap">
 			<h1><?php esc_html_e( 'BLT Optimized — Database Cleanup', 'blt-optimized' ); ?></h1>
+			<?php $this->render_nav_tabs( 'blt-optimized-cleanup' ); ?>
 			<p class="description"><?php esc_html_e( 'Everything below is a dry-run preview by default. Nothing is deleted until you explicitly run a category, and every run is written to the audit log.', 'blt-optimized' ); ?></p>
-			<div class="blt-toolbar">
+			<div class="blt-toolbar blt-cleanup-toolbar">
+				<select id="blt-cleanup-bulk-action" class="blt-bulk-action">
+					<option value=""><?php esc_html_e( 'Bulk actions', 'blt-optimized' ); ?></option>
+					<option value="clean"><?php esc_html_e( 'Clean up', 'blt-optimized' ); ?></option>
+				</select>
+				<button type="button" class="button" id="blt-cleanup-bulk-apply"><?php esc_html_e( 'Apply', 'blt-optimized' ); ?></button>
 				<button type="button" class="button button-primary" id="blt-cleanup-refresh"><?php esc_html_e( 'Refresh previews', 'blt-optimized' ); ?></button>
 			</div>
 			<div id="blt-cleanup-list"><p class="description"><?php esc_html_e( 'Loading previews…', 'blt-optimized' ); ?></p></div>
@@ -554,6 +655,7 @@ class BLT_Optimized_Admin {
 		?>
 		<div class="wrap blt-optimized-wrap">
 			<h1><?php esc_html_e( 'BLT Optimized — Database Optimization', 'blt-optimized' ); ?></h1>
+			<?php $this->render_nav_tabs( 'blt-optimized-db' ); ?>
 			<div id="blt-db-summary" class="blt-cards"></div>
 
 			<h2><?php esc_html_e( 'Autoloaded options', 'blt-optimized' ); ?></h2>
@@ -579,6 +681,7 @@ class BLT_Optimized_Admin {
 		?>
 		<div class="wrap blt-optimized-wrap">
 			<h1><?php esc_html_e( 'BLT Optimized — Audit Log', 'blt-optimized' ); ?></h1>
+			<?php $this->render_nav_tabs( 'blt-optimized-audit' ); ?>
 			<div class="blt-toolbar">
 				<a class="button" href="<?php echo esc_url( $export ); ?>"><?php esc_html_e( 'Export CSV', 'blt-optimized' ); ?></a>
 			</div>
@@ -623,9 +726,27 @@ class BLT_Optimized_Admin {
 		?>
 		<div class="wrap blt-optimized-wrap">
 			<h1><?php esc_html_e( 'BLT Optimized — Settings', 'blt-optimized' ); ?></h1>
+			<?php $this->render_nav_tabs( 'blt-optimized-settings' ); ?>
 			<form method="post" action="options.php">
 				<?php settings_fields( 'blt_optimized_settings_group' ); ?>
 				<table class="form-table" role="presentation">
+					<tr>
+						<th scope="row"><?php esc_html_e( 'Menu location', 'blt-optimized' ); ?></th>
+						<td>
+							<fieldset>
+								<label>
+									<input type="checkbox" name="<?php echo esc_attr( BLT_Optimized::OPTION_SETTINGS ); ?>[show_top_menu]" value="1" <?php checked( ! empty( $settings['show_top_menu'] ) ); ?> />
+									<?php esc_html_e( 'Show top-level admin menu', 'blt-optimized' ); ?>
+								</label>
+								<br />
+								<label>
+									<input type="checkbox" name="<?php echo esc_attr( BLT_Optimized::OPTION_SETTINGS ); ?>[show_tools_menu]" value="1" <?php checked( ! empty( $settings['show_tools_menu'] ) ); ?> />
+									<?php esc_html_e( 'Show under the Tools menu', 'blt-optimized' ); ?>
+								</label>
+								<p class="description"><?php esc_html_e( 'Choose where BLT Optimized appears in wp-admin. If neither is checked, the top-level menu is kept so the plugin stays reachable.', 'blt-optimized' ); ?></p>
+							</fieldset>
+						</td>
+					</tr>
 					<tr>
 						<th scope="row"><label for="blt-scan-schedule"><?php esc_html_e( 'Scheduled auto-scan', 'blt-optimized' ); ?></label></th>
 						<td>

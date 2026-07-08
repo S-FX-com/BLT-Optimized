@@ -38,6 +38,11 @@ class BLT_Optimized_Scanner {
 	const MAX_NOTABLE_FILES      = 500;
 
 	/**
+	 * How many "largest single files" to track across a scan.
+	 */
+	const TOP_FILES_LIMIT = 20;
+
+	/**
 	 * Audit log.
 	 *
 	 * @var BLT_Optimized_Audit_Log
@@ -50,6 +55,16 @@ class BLT_Optimized_Scanner {
 	 * @var bool|null
 	 */
 	private $du_available = null;
+
+	/**
+	 * Running list of the largest individual files seen this run, kept sorted
+	 * largest-first and trimmed to TOP_FILES_LIMIT. Loaded from scan state at
+	 * the start of each tick and written back at the end so it survives the
+	 * batched, multi-tick scan. Each entry: [ path, bytes ].
+	 *
+	 * @var array[]
+	 */
+	private $run_top_files = array();
 
 	/**
 	 * Constructor.
@@ -204,6 +219,8 @@ class BLT_Optimized_Scanner {
 		$deadline   = microtime( true ) + (float) apply_filters( 'blt_optimized_tick_budget', self::TICK_BUDGET );
 		$exclusions = $this->get_exclusions();
 
+		$this->run_top_files = ( isset( $state['top_files'] ) && is_array( $state['top_files'] ) ) ? $state['top_files'] : array();
+
 		while ( ! empty( $state['queue'] ) && microtime( true ) < $deadline ) {
 			list( $rel_path, $depth, $force_leaf ) = array_pad( array_shift( $state['queue'] ), 3, false );
 
@@ -220,6 +237,8 @@ class BLT_Optimized_Scanner {
 
 			$state['dirs_scanned']++;
 		}
+
+		$state['top_files'] = $this->run_top_files;
 
 		if ( empty( $state['queue'] ) ) {
 			$this->finalize_scan( $state );
@@ -275,6 +294,7 @@ class BLT_Optimized_Scanner {
 			$size       = (int) @filesize( $child_abs );
 			$own_bytes += $size;
 			$own_files++;
+			$this->record_top_file( $child_rel, $size );
 			$this->maybe_record_notable_file( $state, $child_rel, $entry, $size, $depth + 1 );
 		}
 
@@ -378,8 +398,10 @@ class BLT_Optimized_Scanner {
 			);
 			foreach ( $iterator as $file ) {
 				if ( $file->isFile() && ! $file->isLink() ) {
-					$bytes += $file->getSize();
+					$size   = (int) $file->getSize();
+					$bytes += $size;
 					$files++;
+					$this->record_top_file( $this->relative_path( $file->getPathname() ), $size );
 				}
 			}
 		} catch ( Exception $e ) { // phpcs:ignore Generic.CodeAnalysis.EmptyStatement.DetectedCatch
@@ -408,6 +430,9 @@ class BLT_Optimized_Scanner {
 			foreach ( $iterator as $file ) {
 				if ( $file->isFile() ) {
 					$files++;
+					if ( ! $file->isLink() ) {
+						$this->record_top_file( $this->relative_path( $file->getPathname() ), (int) $file->getSize() );
+					}
 				}
 			}
 		} catch ( Exception $e ) { // phpcs:ignore Generic.CodeAnalysis.EmptyStatement.DetectedCatch
@@ -457,6 +482,42 @@ class BLT_Optimized_Scanner {
 
 		$this->insert_row( $state['run_id'], $rel_path, $depth, $size, 1, 'file', $flags );
 		$state['notable_count']++;
+	}
+
+	/**
+	 * Offer a file to the "largest files" tracker. The list is kept sorted
+	 * largest-first and capped at TOP_FILES_LIMIT; a file smaller than the
+	 * current smallest tracked file is rejected without a sort, so the common
+	 * case over millions of files is a single comparison.
+	 *
+	 * @param string $rel_path Relative file path.
+	 * @param int    $size     Size in bytes.
+	 */
+	private function record_top_file( $rel_path, $size ) {
+		if ( $size <= 0 ) {
+			return;
+		}
+
+		$count = count( $this->run_top_files );
+		if ( $count >= self::TOP_FILES_LIMIT && $size <= $this->run_top_files[ $count - 1 ]['bytes'] ) {
+			return;
+		}
+
+		$this->run_top_files[] = array(
+			'path'  => $rel_path,
+			'bytes' => $size,
+		);
+
+		usort(
+			$this->run_top_files,
+			static function ( $a, $b ) {
+				return $b['bytes'] <=> $a['bytes'];
+			}
+		);
+
+		if ( count( $this->run_top_files ) > self::TOP_FILES_LIMIT ) {
+			$this->run_top_files = array_slice( $this->run_top_files, 0, self::TOP_FILES_LIMIT );
+		}
 	}
 
 	/* ------------------------------------------------------------------ */
@@ -549,6 +610,7 @@ class BLT_Optimized_Scanner {
 			'files_seen'   => $state['files_seen'],
 			'bytes_seen'   => $state['bytes_seen'],
 			'image_sizes'  => $this->registered_image_sizes_report(),
+			'top_files'    => ( isset( $state['top_files'] ) && is_array( $state['top_files'] ) ) ? array_slice( $state['top_files'], 0, self::TOP_FILES_LIMIT ) : array(),
 		);
 		update_option( self::LAST_SCAN_OPTION, $summary, false );
 
@@ -815,6 +877,21 @@ class BLT_Optimized_Scanner {
 			),
 			ARRAY_A
 		);
+	}
+
+	/**
+	 * The largest individual files from the last completed scan, recorded live
+	 * during the scan (no separate pass). Largest-first.
+	 *
+	 * @param int $limit Maximum number of files to return.
+	 * @return array[] Each: path, bytes.
+	 */
+	public function get_top_files( $limit = self::TOP_FILES_LIMIT ) {
+		$summary = $this->get_last_scan();
+		if ( ! $summary || empty( $summary['top_files'] ) || ! is_array( $summary['top_files'] ) ) {
+			return array();
+		}
+		return array_slice( $summary['top_files'], 0, max( 1, (int) $limit ) );
 	}
 
 	/* ------------------------------------------------------------------ */

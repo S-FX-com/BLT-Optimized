@@ -1,0 +1,102 @@
+name: Release on main
+
+# Bumps the plugin version, tags it, builds the installable zip, and
+# publishes a GitHub Release with the zip attached whenever main advances.
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    if: "!contains(github.event.head_commit.message, '[skip release]')"
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Determine version bump
+        id: bump
+        run: |
+          set -euo pipefail
+          current=$(sed -n 's/^ \* Version: *\(.*\)$/\1/p' blt-optimized.php | tr -d '[:space:]')
+          if [ -z "$current" ]; then
+            echo "Could not find current version in blt-optimized.php" >&2
+            exit 1
+          fi
+
+          IFS='.' read -r major minor patch <<< "$current"
+
+          msg="${{ github.event.head_commit.message }}"
+          case "$msg" in
+            *'#major'*) major=$((major + 1)); minor=0; patch=0 ;;
+            *'#minor'*) minor=$((minor + 1)); patch=0 ;;
+            *) patch=$((patch + 1)) ;;
+          esac
+
+          new="${major}.${minor}.${patch}"
+          echo "current=$current" >> "$GITHUB_OUTPUT"
+          echo "new=$new" >> "$GITHUB_OUTPUT"
+
+      - name: Bump version in plugin files
+        run: |
+          set -euo pipefail
+          current="${{ steps.bump.outputs.current }}"
+          new="${{ steps.bump.outputs.new }}"
+
+          sed -i "s/^ \* Version: .*/ * Version:           ${new}/" blt-optimized.php
+          sed -i "s/^define( 'BLT_OPTIMIZED_VERSION', '.*' );/define( 'BLT_OPTIMIZED_VERSION', '${new}' );/" blt-optimized.php
+          sed -i "s/^Stable tag: .*/Stable tag: ${new}/" readme.txt
+
+      - name: Commit version bump
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add blt-optimized.php readme.txt
+          git commit -m "chore: bump version to ${{ steps.bump.outputs.new }} [skip release]"
+          git push origin HEAD:main
+
+      - name: Tag release
+        run: |
+          set -euo pipefail
+          tag="v${{ steps.bump.outputs.new }}"
+          git tag "$tag"
+          git push origin "$tag"
+
+      - name: Vendor plugin-update-checker
+        run: |
+          set -euo pipefail
+          curl -sL -o puc.zip https://github.com/YahnisElsts/plugin-update-checker/archive/refs/tags/v5.7.zip
+          unzip -q puc.zip
+          rm -rf plugin-update-checker
+          mv plugin-update-checker-5.7 plugin-update-checker
+          rm puc.zip
+
+      - name: Build plugin zip
+        run: |
+          set -euo pipefail
+          new="${{ steps.bump.outputs.new }}"
+          build_dir="build/blt-optimized"
+          mkdir -p "$build_dir"
+          rsync -a \
+            --exclude='.git' \
+            --exclude='.github' \
+            --exclude='build' \
+            --exclude='node_modules' \
+            --exclude='*.zip' \
+            ./ "$build_dir/"
+          (cd build && zip -r "../blt-optimized-${new}.zip" blt-optimized)
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: "v${{ steps.bump.outputs.new }}"
+          name: "v${{ steps.bump.outputs.new }}"
+          generate_release_notes: true
+          files: blt-optimized-${{ steps.bump.outputs.new }}.zip

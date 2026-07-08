@@ -3,7 +3,7 @@
  * Plugin Name:       BLT Optimized
  * Plugin URI:        https://github.com/S-FX-com/BLT-Optimized
  * Description:       Disk-usage forensics and database optimization for WordPress. Folder-by-folder wp-content size breakdown, orphaned data cleanup, and table optimization — standalone, zero external dependency.
- * Version:           1.0.0
+ * Version:           1.0.1
  * Requires at least: 6.0
  * Requires PHP:      8.0
  * Author:            S-FX.com Small Business Solutions
@@ -17,7 +17,7 @@
 
 defined( 'ABSPATH' ) || exit;
 
-define( 'BLT_OPTIMIZED_VERSION', '1.0.0' );
+define( 'BLT_OPTIMIZED_VERSION', '1.0.1' );
 define( 'BLT_OPTIMIZED_FILE', __FILE__ );
 define( 'BLT_OPTIMIZED_DIR', plugin_dir_path( __FILE__ ) );
 define( 'BLT_OPTIMIZED_URL', plugin_dir_url( __FILE__ ) );

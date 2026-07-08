@@ -228,6 +228,9 @@ class BLT_Optimized_Admin {
 		$clean['show_top_menu']   = empty( $input['show_top_menu'] ) ? 0 : 1;
 		$clean['show_tools_menu'] = empty( $input['show_tools_menu'] ) ? 0 : 1;
 
+		// Optional image-optimization module.
+		$clean['enable_images'] = empty( $input['enable_images'] ) ? 0 : 1;
+
 		// Guarantee the plugin stays reachable from at least one menu.
 		if ( ! $clean['show_top_menu'] && ! $clean['show_tools_menu'] ) {
 			$clean['show_top_menu'] = 1;
@@ -744,6 +747,20 @@ class BLT_Optimized_Admin {
 									<?php esc_html_e( 'Show under the Tools menu', 'blt-optimized' ); ?>
 								</label>
 								<p class="description"><?php esc_html_e( 'Choose where BLT Optimized appears in wp-admin. If neither is checked, the top-level menu is kept so the plugin stays reachable.', 'blt-optimized' ); ?></p>
+							</fieldset>
+						</td>
+					</tr>
+					<tr>
+						<th scope="row"><?php esc_html_e( 'Image optimization', 'blt-optimized' ); ?></th>
+						<td>
+							<fieldset>
+								<label>
+									<input type="checkbox" name="<?php echo esc_attr( BLT_Optimized::OPTION_SETTINGS ); ?>[enable_images]" value="1" <?php checked( ! empty( $settings['enable_images'] ) ); ?> />
+									<?php esc_html_e( 'Enable the image-optimization module (compress + WebP)', 'blt-optimized' ); ?>
+								</label>
+								<p class="description">
+									<?php esc_html_e( 'Adds Image Optimizer, Image Settings, and Image Log pages to this menu. Requires a self-hosted Cloudflare Worker (configure it under Image Settings). Leaving this off keeps BLT Optimized fully standalone with no external dependency.', 'blt-optimized' ); ?>
+								</p>
 							</fieldset>
 						</td>
 					</tr>

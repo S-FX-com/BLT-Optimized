@@ -6,6 +6,15 @@ Most optimization plugins treat database bloat as the whole problem. In practice
 
 Works standalone with zero external dependency. Handoff clients get full value from day one.
 
+### Optional: image-optimization module (v1.1)
+
+BLT Optimized also bundles an **optional image-optimization module** (off by default), merged in from the former standalone *Blt Image Optimizer* plugin. It permanently optimizes images on disk — compression + WebP conversion — by routing them through a self-hosted Cloudflare Worker (`worker/`), then rewrites front-end URLs/srcset to serve the `.webp`.
+
+- Enable under **Settings → Image optimization** (setting key `enable_images`). When off, no image code runs and no image table/options are created — the disk/DB core keeps its zero-dependency guarantee.
+- Self-contained under the `BltImageOptimizer\` namespace in `includes/images/` + `admin/images/`, with its own log table (`{prefix}blt_optimizer_log`) and settings option (`blt_optimizer_settings` — note: one letter off from the core's `blt_optimized_settings`, kept intentionally distinct).
+- Requires the Worker deployed to a real **zone route** (not `*.workers.dev` — `cf.image` transforms are unavailable there). Configure the Worker URL + shared secret under **Image Settings** and use **Test Connection** to verify.
+- Hand-off safe: optimized `.webp` files and their `_blt_webp_sizes` / `_blt_optimized` postmeta are preserved on uninstall, so the site keeps serving WebP after the plugin (and Worker) are gone.
+
 ## Features (v1.0)
 
 ### Disk usage scanner (primary)

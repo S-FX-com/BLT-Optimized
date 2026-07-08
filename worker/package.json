@@ -1,0 +1,21 @@
+{
+  "name": "blt-image-optimizer-worker",
+  "version": "2026.05.30.0001",
+  "description": "Cloudflare Worker that applies cf.image WebP transforms for the Blt Image Optimizer WordPress plugin.",
+  "private": true,
+  "author": "Shane Skwarek / S-FX.com",
+  "license": "GPL-2.0-or-later",
+  "type": "module",
+  "main": "src/index.ts",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "typecheck": "tsc --noEmit",
+    "tail": "wrangler tail"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.20260101.0",
+    "typescript": "^5.4.0",
+    "wrangler": "^3.60.0"
+  }
+}

@@ -18,6 +18,8 @@ $status     = $state['status'] ?? 'idle';
 <div class="wrap blt-optimizer-wrap">
 	<h1><?php esc_html_e( 'Blt Image Optimizer — Bulk Optimizer', 'blt-image-optimizer' ); ?></h1>
 
+	<?php if ( class_exists( '\\BLT_Optimized_Admin' ) ) { \BLT_Optimized_Admin::render_tabs( 'blt-optimizer' ); } ?>
+
 	<?php if ( ! $configured ) : ?>
 		<div class="notice notice-warning">
 			<p>

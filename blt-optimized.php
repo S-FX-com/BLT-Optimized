@@ -94,6 +94,12 @@ if ( file_exists( BLT_OPTIMIZED_DIR . 'plugin-update-checker/plugin-update-check
 	);
 	$blt_optimized_update_checker->setBranch( 'main' );
 
+	// Without this, PUC installs GitHub's auto-generated source archive for the
+	// release tag instead of the release.yml-built zip — which never contains
+	// this vendored plugin-update-checker/ directory (it's .gitignore'd), so the
+	// very first auto-update would silently disable all future update checks.
+	$blt_optimized_update_checker->getVcsApi()->enableReleaseAssets( '/\.zip$/' );
+
 	// If the repository stays private, supply a token via wp-config.php:
 	// define( 'BLT_OPTIMIZED_GITHUB_TOKEN', '...' );
 	if ( defined( 'BLT_OPTIMIZED_GITHUB_TOKEN' ) && BLT_OPTIMIZED_GITHUB_TOKEN ) {

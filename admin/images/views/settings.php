@@ -17,6 +17,8 @@ $has_secret = '' !== ( $settings['worker_secret'] ?? '' );
 <div class="wrap blt-optimizer-wrap">
 	<h1><?php esc_html_e( 'Blt Image Optimizer — Settings', 'blt-image-optimizer' ); ?></h1>
 
+	<?php if ( class_exists( '\\BLT_Optimized_Admin' ) ) { \BLT_Optimized_Admin::render_tabs( 'blt-optimizer-settings' ); } ?>
+
 	<?php if ( ! empty( $saved ) ) : ?>
 		<div class="notice notice-success is-dismissible">
 			<p><?php esc_html_e( 'Settings saved.', 'blt-image-optimizer' ); ?></p>

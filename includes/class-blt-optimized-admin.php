@@ -33,7 +33,9 @@ class BLT_Optimized_Admin {
 
 		add_action( 'admin_menu', array( $this, 'register_menu' ) );
 		add_action( 'admin_init', array( $this, 'register_settings' ) );
+		add_action( 'admin_init', array( $this, 'maybe_dismiss_images_hint' ) );
 		add_action( 'admin_enqueue_scripts', array( $this, 'enqueue_assets' ) );
+		add_action( 'admin_notices', array( $this, 'render_images_hint' ) );
 
 		$ajax = array(
 			'scan_start'      => 'ajax_scan_start',
@@ -130,23 +132,144 @@ class BLT_Optimized_Admin {
 	}
 
 	/**
-	 * Render the shared tab navigation used across every plugin page.
+	 * The tab strip, as slug => label.
+	 *
+	 * Exposed through the `blt_optimized_nav_tabs` filter so optional modules
+	 * (e.g. the image optimizer) can append their own pages without the core
+	 * plugin needing any knowledge of them — the disk/DB core stays standalone.
+	 *
+	 * @return array<string,string>
+	 */
+	public static function nav_tabs() {
+		$tabs = array(
+			'blt-optimized'          => __( 'Disk Usage', 'blt-optimized' ),
+			'blt-optimized-cleanup'  => __( 'Database Cleanup', 'blt-optimized' ),
+			'blt-optimized-db'       => __( 'Optimization', 'blt-optimized' ),
+			'blt-optimized-audit'    => __( 'Audit Log', 'blt-optimized' ),
+			'blt-optimized-settings' => __( 'Settings', 'blt-optimized' ),
+		);
+
+		/**
+		 * Filter the BLT Optimized admin tab strip.
+		 *
+		 * @param array<string,string> $tabs Page slug => tab label, in tab order.
+		 */
+		return apply_filters( 'blt_optimized_nav_tabs', $tabs );
+	}
+
+	/**
+	 * Render the shared tab navigation. Public + static so the optional image
+	 * module's pages (a separate class) can render the same strip.
 	 *
 	 * @param string $current Slug of the active page.
+	 * @return void
 	 */
-	private function render_nav_tabs( $current ) {
+	public static function render_tabs( $current ) {
 		echo '<nav class="nav-tab-wrapper blt-nav-tabs">';
-		foreach ( $this->pages() as $slug => $page ) {
+		foreach ( self::nav_tabs() as $slug => $label ) {
 			$url    = menu_page_url( $slug, false );
 			$active = ( $slug === $current ) ? ' nav-tab-active' : '';
 			printf(
 				'<a href="%1$s" class="nav-tab%2$s">%3$s</a>',
 				esc_url( $url ),
 				esc_attr( $active ),
-				esc_html( $page[0] )
+				esc_html( $label )
 			);
 		}
 		echo '</nav>';
+	}
+
+	/**
+	 * Render the shared tab navigation used across every plugin page.
+	 *
+	 * @param string $current Slug of the active page.
+	 */
+	private function render_nav_tabs( $current ) {
+		self::render_tabs( $current );
+	}
+
+	/* ------------------------------------------------------------------ */
+	/* Image module discoverability                                        */
+	/* ------------------------------------------------------------------ */
+
+	/**
+	 * User-meta key recording that the current user dismissed the hint.
+	 */
+	const IMAGES_HINT_META = 'blt_optimized_images_hint_dismissed';
+
+	/**
+	 * Point admins at the optional image-optimization module.
+	 *
+	 * The module ships with the plugin but stays off by default (so the disk/DB
+	 * core keeps its zero-dependency guarantee). Without a nudge it's easy to
+	 * miss, so surface a one-time notice on the plugin's own screens linking
+	 * straight to the toggle. Shown only when the module is off and the notice
+	 * has not been dismissed.
+	 *
+	 * @return void
+	 */
+	public function render_images_hint() {
+		if ( ! current_user_can( self::CAPABILITY ) ) {
+			return;
+		}
+
+		$settings = BLT_Optimized::get_settings();
+		if ( ! empty( $settings['enable_images'] ) ) {
+			return; // Module already on.
+		}
+
+		$screen = get_current_screen();
+		if ( ! $screen || false === strpos( (string) $screen->id, 'blt-optimized' ) ) {
+			return; // Only on our own pages.
+		}
+
+		if ( get_user_meta( get_current_user_id(), self::IMAGES_HINT_META, true ) ) {
+			return; // Previously dismissed.
+		}
+
+		$settings_url = admin_url( 'admin.php?page=blt-optimized-settings' );
+		$dismiss_url  = wp_nonce_url(
+			add_query_arg( 'blt_optimized_dismiss_images_hint', '1' ),
+			'blt_optimized_dismiss_images_hint'
+		);
+		?>
+		<div class="notice notice-info">
+			<p>
+				<strong><?php esc_html_e( 'BLT Optimized', 'blt-optimized' ); ?></strong> —
+				<?php esc_html_e( 'This plugin includes an optional image-optimization module (compress + WebP via a self-hosted Cloudflare Worker). It is off by default.', 'blt-optimized' ); ?>
+			</p>
+			<p>
+				<a class="button button-primary" href="<?php echo esc_url( $settings_url ); ?>">
+					<?php esc_html_e( 'Enable image optimization', 'blt-optimized' ); ?>
+				</a>
+				<a class="button-link" href="<?php echo esc_url( $dismiss_url ); ?>" style="margin-left:8px;">
+					<?php esc_html_e( 'Dismiss', 'blt-optimized' ); ?>
+				</a>
+			</p>
+		</div>
+		<?php
+	}
+
+	/**
+	 * Persist dismissal of the image-module hint for the current user.
+	 *
+	 * @return void
+	 */
+	public function maybe_dismiss_images_hint() {
+		if ( empty( $_GET['blt_optimized_dismiss_images_hint'] ) ) { // phpcs:ignore WordPress.Security.NonceVerification.Recommended -- Verified below.
+			return;
+		}
+
+		if ( ! current_user_can( self::CAPABILITY ) ) {
+			return;
+		}
+
+		check_admin_referer( 'blt_optimized_dismiss_images_hint' );
+
+		update_user_meta( get_current_user_id(), self::IMAGES_HINT_META, 1 );
+
+		wp_safe_redirect( remove_query_arg( array( 'blt_optimized_dismiss_images_hint', '_wpnonce' ) ) );
+		exit;
 	}
 
 	/**

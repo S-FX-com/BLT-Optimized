@@ -50,6 +50,7 @@ class Admin {
 	 */
 	public function init() {
 		add_action( 'admin_menu', array( $this, 'register_menu' ) );
+		add_filter( 'blt_optimized_nav_tabs', array( $this, 'register_nav_tabs' ) );
 		add_action( 'admin_init', array( $this, 'handle_settings_post' ) );
 		add_action( 'admin_enqueue_scripts', array( $this, 'enqueue_assets' ) );
 		add_action( 'wp_dashboard_setup', array( $this, 'register_dashboard_widget' ) );
@@ -107,6 +108,24 @@ class Admin {
 			self::MENU_SLUG . '-log',
 			array( $this, 'render_log_page' )
 		);
+	}
+
+	/**
+	 * Append the image pages to the shared BLT Optimized tab strip.
+	 *
+	 * Hooked on `blt_optimized_nav_tabs` so the core plugin stays unaware of
+	 * this module; the tabs appear across every BLT Optimized screen only while
+	 * the module is enabled (this filter is added in init(), which only runs
+	 * when the module is booted).
+	 *
+	 * @param array<string,string> $tabs Existing tabs (slug => label).
+	 * @return array<string,string>
+	 */
+	public function register_nav_tabs( $tabs ) {
+		$tabs[ self::MENU_SLUG ]               = __( 'Image Optimizer', 'blt-image-optimizer' );
+		$tabs[ self::MENU_SLUG . '-settings' ] = __( 'Image Settings', 'blt-image-optimizer' );
+		$tabs[ self::MENU_SLUG . '-log' ]      = __( 'Image Log', 'blt-image-optimizer' );
+		return $tabs;
 	}
 
 	/**

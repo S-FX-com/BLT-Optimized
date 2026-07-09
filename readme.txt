@@ -74,6 +74,10 @@ Scans run in time-boxed batches and the partial state is persisted between ticks
 
 == Changelog ==
 
+= 1.1.3 =
+* Image optimization is now easier to find: when the module is off, an admin notice on the plugin's screens links straight to the toggle (dismissible per user).
+* When the module is on, its Image Optimizer, Image Settings, and Image Log pages now appear in the shared tab strip alongside the disk/DB pages. The module remains off by default.
+
 = 1.1.0 =
 * New optional image-optimization module (merged in from the former standalone Blt Image Optimizer plugin): compress + WebP conversion via a self-hosted Cloudflare Worker, auto-optimize on upload, bulk runner, and front-end WebP URL/srcset rewriting.
 * The module is off by default and toggled under Settings → Image optimization; the disk/DB core stays standalone with zero external dependency when it is off.

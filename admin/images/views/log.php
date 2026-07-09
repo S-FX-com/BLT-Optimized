@@ -31,6 +31,8 @@ $filters = array(
 <div class="wrap blt-optimizer-wrap">
 	<h1><?php esc_html_e( 'Blt Image Optimizer — Log', 'blt-image-optimizer' ); ?></h1>
 
+	<?php if ( class_exists( '\\BLT_Optimized_Admin' ) ) { \BLT_Optimized_Admin::render_tabs( 'blt-optimizer-log' ); } ?>
+
 	<ul class="subsubsub">
 		<?php foreach ( $filters as $key => $label ) : ?>
 			<li>

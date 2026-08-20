@@ -98,7 +98,17 @@ class BLT_Family_Crypto {
 
 		$key = self::key();
 
-		if ( 0 === strpos( $stored, self::ENVELOPE_SODIUM ) && function_exists( 'sodium_crypto_secretbox_open' ) ) {
+		if ( 0 === strpos( $stored, self::ENVELOPE_SODIUM ) ) {
+			// Recognized envelope, backend gone: fail CLOSED. Falling through to
+			// the legacy-plaintext return at the bottom would hand the caller
+			// the raw ciphertext as if it were the credential, and the store
+			// would report the secret as configured while every request signed
+			// with it failed. This happens for real when a database is moved to
+			// a host without libsodium.
+			if ( ! function_exists( 'sodium_crypto_secretbox_open' ) ) {
+				return '';
+			}
+
 			// phpcs:ignore WordPress.PHP.DiscouragedPHPFunctions.obfuscation_base64_decode
 			$raw = base64_decode( substr( $stored, strlen( self::ENVELOPE_SODIUM ) ), true );
 
@@ -113,7 +123,12 @@ class BLT_Family_Crypto {
 			return false === $plain ? '' : $plain;
 		}
 
-		if ( 0 === strpos( $stored, self::ENVELOPE_OPENSSL ) && function_exists( 'openssl_decrypt' ) ) {
+		if ( 0 === strpos( $stored, self::ENVELOPE_OPENSSL ) ) {
+			// Same fail-closed rule as the sodium branch above.
+			if ( ! function_exists( 'openssl_decrypt' ) ) {
+				return '';
+			}
+
 			// phpcs:ignore WordPress.PHP.DiscouragedPHPFunctions.obfuscation_base64_decode
 			$raw = base64_decode( substr( $stored, strlen( self::ENVELOPE_OPENSSL ) ), true );
 
@@ -135,7 +150,10 @@ class BLT_Family_Crypto {
 			return false === $plain ? '' : $plain;
 		}
 
-		// Unrecognized / legacy plaintext.
+		// Unrecognized: a value stored before this plugin encrypted anything.
+		// Every envelope this class produces is handled above, and each of those
+		// branches returns rather than falling through, so nothing enveloped can
+		// reach here and be mistaken for plaintext.
 		return $stored;
 	}
 

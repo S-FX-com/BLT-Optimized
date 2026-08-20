@@ -30,6 +30,7 @@ $GLOBALS['actions'] = array();
 $GLOBALS['trans']   = array();
 $GLOBALS['cron']       = array();
 $GLOBALS['recurrence'] = array();
+$GLOBALS['hook_stack']  = array();
 
 function get_option( $name, $default = false ) {
 	return array_key_exists( $name, $GLOBALS['opts'] ) ? $GLOBALS['opts'][ $name ] : $default;
@@ -49,9 +50,14 @@ function add_filter( $tag, $cb, $prio = 10, $args = 1 ) {
 }
 function apply_filters( $tag, $value ) {
 	$extra = array_slice( func_get_args(), 2 );
+	// Push onto the hook stack exactly as WordPress does, so current_filter()
+	// reports the innermost hook and doing_action() can see the outer one. The
+	// distinction is the whole point of one of the assertions below.
+	$GLOBALS['hook_stack'][] = $tag;
 	foreach ( ( isset( $GLOBALS['filters'][ $tag ] ) ? $GLOBALS['filters'][ $tag ] : array() ) as $cb ) {
 		$value = call_user_func_array( $cb, array_merge( array( $value ), $extra ) );
 	}
+	array_pop( $GLOBALS['hook_stack'] );
 	return $value;
 }
 function add_action( $tag, $cb, $prio = 10, $args = 1 ) {
@@ -59,12 +65,17 @@ function add_action( $tag, $cb, $prio = 10, $args = 1 ) {
 	return true;
 }
 function do_action( $tag ) {
+	$GLOBALS['hook_stack'][] = $tag;
 	foreach ( ( isset( $GLOBALS['actions'][ $tag ] ) ? $GLOBALS['actions'][ $tag ] : array() ) as $cb ) {
 		call_user_func( $cb );
 	}
+	array_pop( $GLOBALS['hook_stack'] );
 }
 function current_filter() {
-	return $GLOBALS['current_filter'];
+	return empty( $GLOBALS['hook_stack'] ) ? false : end( $GLOBALS['hook_stack'] );
+}
+function doing_action( $tag ) {
+	return in_array( $tag, $GLOBALS['hook_stack'], true );
 }
 function wp_salt( $scheme = 'auth' ) {
 	return 'smoke-salt-' . $scheme;
@@ -193,7 +204,11 @@ ok( BLT_Family::is_multi_plugin(), 'multi-plugin detected' );
 echo "\n== the opt-in gate ==\n";
 BLT_Family_Store::set_group( 'stripe', array( 'secret_key' => 'sk_live_ABC', 'publishable_key' => 'pk_live_ABC' ) );
 ok( 'sk_live_ABC' === BLT_Family_Store::get( 'stripe', 'secret_key' ), 'encrypted secret round-trips through the store' );
-ok( 'bf1:' === substr( get_option( 'blt_family_shared' )['stripe']['secret_key'], 0, 4 ), 'secret is enveloped at rest' );
+$envelope = substr( get_option( 'blt_family_shared' )['stripe']['secret_key'], 0, 4 );
+ok(
+	in_array( $envelope, array( 'bf1:', 'bf2:' ), true ),
+	"secret is enveloped at rest with an authenticated cipher (got '$envelope')"
+);
 ok( 'pk_live_ABC' === get_option( 'blt_family_shared' )['stripe']['publishable_key'], 'non-secret stored in the clear' );
 
 ok( '' === BLT_Family::get( 'blt-events', 'stripe', 'secret_key' ), 'NOT readable before opt-in' );
@@ -267,24 +282,69 @@ ok( 24 === $checker->scheduler->checkPeriod, 'checkPeriod forced to 24h' );
 ok( in_array( 'check_now', $checker->filters, true ), 'check_now filter installed' );
 ok( in_array( 'first_check_time', $checker->filters, true ), 'first_check_time filter installed' );
 
-// The floor.
-$hook                      = 'puc_check_now-blt-thing';
-$GLOBALS['current_filter'] = 'admin_init';
-ok( false === apply_filters( $hook, true, time() - 3600, 24 ), 'blocks an opportunistic check 1h after the last one' );
-ok( true === apply_filters( $hook, true, time() - 90000, 24 ), 'allows it once 24h have elapsed' );
-ok( false === apply_filters( $hook, false, 0, 24 ), 'never widens a false decision' );
+// The floor. Each case runs the filter the way WordPress would — nested inside
+// whatever outer hook is being simulated — because the cron exemption depends on
+// the difference between current_filter() and doing_action().
+$hook = 'puc_check_now-blt-thing';
 
-$GLOBALS['current_filter'] = 'puc_cron_check_updates-blt-thing';
-ok( true === apply_filters( $hook, true, time() - 86399, 24 ), 'the daily cron event is exempt (no 48h gap)' );
+/**
+ * Run the check_now filter as if $outer_hook were firing.
+ */
+function under_hook( $outer_hook, $callable ) {
+	$GLOBALS['hook_stack'][] = $outer_hook;
+	$result                  = $callable();
+	array_pop( $GLOBALS['hook_stack'] );
+	return $result;
+}
 
-$GLOBALS['current_filter'] = 'load-update-core.php';
-$_GET['force-check']       = '1';
-ok( true === apply_filters( $hook, true, time() - 5, 24 ), '"Check again" (force-check) bypasses the floor' );
+ok(
+	false === under_hook( 'admin_init', function () use ( $hook ) {
+		return apply_filters( $hook, true, time() - 3600, 24 ); } ),
+	'blocks an opportunistic check 1h after the last one'
+);
+ok(
+	true === under_hook( 'admin_init', function () use ( $hook ) {
+		return apply_filters( $hook, true, time() - 90000, 24 ); } ),
+	'allows it once 24h have elapsed'
+);
+ok(
+	false === under_hook( 'admin_init', function () use ( $hook ) {
+		return apply_filters( $hook, false, 0, 24 ); } ),
+	'never widens a false decision'
+);
+
+// The regression the exemption exists for. PUC applies check_now from inside
+// Scheduler::maybeCheckForUpdates(), so within the callback current_filter() is
+// the INNER puc_check_now-* filter — an exemption written against
+// current_filter() would silently never match, and a cron run landing just
+// inside 24h of a late previous run would be dropped, giving a 48h gap.
+ok(
+	true === under_hook( 'puc_cron_check_updates-blt-thing', function () use ( $hook ) {
+		return apply_filters( $hook, true, time() - 86399, 24 ); } ),
+	'the daily cron event is exempt even 1s inside the 24h floor (no 48h gap)'
+);
+ok(
+	'puc_check_now-blt-thing' === under_hook( 'puc_cron_check_updates-blt-thing', function () use ( $hook ) {
+		return apply_filters( $hook . '-probe', 'unset' ) === 'unset'
+			? under_hook( 'puc_check_now-blt-thing', 'current_filter' )
+			: 'unexpected'; } ),
+	'current_filter() really does report the inner filter, not the cron hook'
+);
+
+$_GET['force-check'] = '1';
+ok(
+	true === under_hook( 'load-update-core.php', function () use ( $hook ) {
+		return apply_filters( $hook, true, time() - 5, 24 ); } ),
+	'"Check again" (force-check) bypasses the floor'
+);
 unset( $_GET['force-check'] );
-ok( false === apply_filters( $hook, true, time() - 5, 24 ), 'merely opening Dashboard -> Updates does not' );
+ok(
+	false === under_hook( 'load-update-core.php', function () use ( $hook ) {
+		return apply_filters( $hook, true, time() - 5, 24 ); } ),
+	'merely opening Dashboard -> Updates does not'
+);
 
 // Re-anchoring an existing randomly-offset event.
-$GLOBALS['current_filter'] = 'admin_init';
 do_action( 'admin_init' );
 $anchored = ( new DateTimeImmutable( '@' . $GLOBALS['cron']['puc_cron_check_updates-blt-thing'] ) )->setTimezone( wp_timezone() );
 ok( '00:00:00' === $anchored->format( 'H:i:s' ), 're-anchored an existing off-midnight event (now ' . $anchored->format( 'Y-m-d H:i:s' ) . ')' );

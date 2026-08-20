@@ -65,6 +65,13 @@ class BLT_Family {
 	private static $booted = false;
 
 	/**
+	 * Version of the copy that declared the load-time utilities.
+	 *
+	 * @var string
+	 */
+	private static $utilities_version = self::VERSION;
+
+	/**
 	 * Bring the library up. Called once, from blt_family_boot().
 	 *
 	 * @param array<string,array> $plugins Registry collected by bootstrap.php.
@@ -77,6 +84,10 @@ class BLT_Family {
 
 		self::$booted  = true;
 		self::$plugins = $plugins;
+
+		self::$utilities_version = isset( $GLOBALS['blt_family_lib']['utilities_version'] )
+			? (string) $GLOBALS['blt_family_lib']['utilities_version']
+			: self::VERSION;
 
 		// The shared UI exists only where it earns its keep: a site running a
 		// single BLT plugin gets no extra menu, no notice and no new screen.
@@ -111,6 +122,30 @@ class BLT_Family {
 	 */
 	public static function is_multi_plugin() {
 		return self::count() > 1;
+	}
+
+	/**
+	 * Whether the load-time utilities came from an older copy than this one.
+	 *
+	 * BLT_Family_Brand and BLT_Family_Updates are declared by whichever plugin
+	 * loads first, before any election can run (see bootstrap.php). When that
+	 * copy is older than the elected library, its update policy is the one in
+	 * force — so say so, rather than leaving a site quietly running behaviour
+	 * nobody chose.
+	 *
+	 * @return bool
+	 */
+	public static function utilities_are_stale() {
+		return version_compare( self::$utilities_version, self::VERSION, '<' );
+	}
+
+	/**
+	 * Version of the copy that declared the load-time utilities.
+	 *
+	 * @return string
+	 */
+	public static function utilities_version() {
+		return self::$utilities_version;
 	}
 
 	/**

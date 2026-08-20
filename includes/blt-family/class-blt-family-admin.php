@@ -245,6 +245,21 @@ class BLT_Family_Admin {
 				</span>
 			</div>
 
+			<?php if ( BLT_Family::utilities_are_stale() ) : ?>
+				<div class="notice notice-warning inline">
+					<p>
+						<?php
+						printf(
+							/* translators: 1: older library version in use, 2: newest installed library version. */
+							esc_html__( 'Your BLT plugins ship different versions of the shared library. The update policy currently in force comes from version %1$s, because that plugin loads first, while the newest installed copy is %2$s. Update every BLT plugin so they match.', 'blt-family' ),
+							esc_html( BLT_Family::utilities_version() ),
+							esc_html( BLT_Family::VERSION )
+						);
+						?>
+					</p>
+				</div>
+			<?php endif; ?>
+
 			<?php if ( ! BLT_Family_Crypto::is_strong() ) : ?>
 				<div class="notice notice-warning inline">
 					<p>
@@ -305,7 +320,7 @@ class BLT_Family_Admin {
 							<td>
 								<strong>
 									<?php if ( '' !== $plugin['menu'] ) : ?>
-										<a href="<?php echo esc_url( add_query_arg( array( 'page' => $plugin['menu'] ), admin_url( 'admin.php' ) ) ); ?>">
+										<a href="<?php echo esc_url( self::plugin_page_url( $plugin['menu'] ) ); ?>">
 											<?php echo esc_html( $plugin['name'] ); ?>
 										</a>
 									<?php else : ?>
@@ -460,6 +475,30 @@ class BLT_Family_Admin {
 		if ( 'saved' === $said ) {
 			echo '<div class="notice notice-success inline"><p>' . esc_html__( 'Shared settings saved.', 'blt-family' ) . '</p></div>';
 		}
+	}
+
+	/**
+	 * The admin URL for a registered plugin's page.
+	 *
+	 * A bare slug resolves against admin.php, which is right for a page added
+	 * with add_menu_page() or a submenu of one. It is wrong for a submenu whose
+	 * parent is something else — WordPress dispatches a submenu callback through
+	 * its parent, so 'edit.php?post_type=event&page=blt-events-settings' loaded
+	 * as 'admin.php?page=blt-events-settings' cannot reach the callback at all.
+	 * Those plugins register the relative URL instead of a slug, and it is
+	 * passed through.
+	 *
+	 * @param string $menu Registered slug, or a relative admin URL.
+	 * @return string
+	 */
+	private static function plugin_page_url( $menu ) {
+		$menu = (string) $menu;
+
+		if ( false !== strpos( $menu, '?' ) || false !== strpos( $menu, '.php' ) ) {
+			return admin_url( ltrim( $menu, '/' ) );
+		}
+
+		return add_query_arg( array( 'page' => $menu ), admin_url( 'admin.php' ) );
 	}
 
 	/**

@@ -52,12 +52,34 @@ $GLOBALS['blt_family_lib']['candidates'][] = array(
 
 // Load-time utilities. Guarded because every BLT plugin on the site runs this
 // file, and redeclaring a class is fatal.
+//
+// These two are therefore FIRST-LOADER-WINS, unlike everything the election
+// governs, and that is not a free choice: a plugin builds its update checker at
+// the top of its own main file, so the utilities have to exist before any
+// election can have run. On a site whose BLT plugins ship different library
+// versions mid-upgrade, the copy that happens to load first is the one that
+// defines them.
+//
+// Two consequences, both handled rather than hoped away:
+//   1. A fix to the update policy in a newer copy does not take effect until
+//      the plugin that loads first has also been updated. The version recorded
+//      below lets BLT_Family::boot() spot that and warn on the family screen.
+//   2. A method added to either class after this version MUST be called behind
+//      method_exists() until the whole fleet ships it, or a newer plugin
+//      calling it against an older copy fatals during plugin load. Bump
+//      BLT_Family::VERSION and the version above whenever you add one.
 if ( ! class_exists( 'BLT_Family_Brand' ) ) {
 	require_once __DIR__ . '/class-blt-family-brand.php';
 }
 
 if ( ! class_exists( 'BLT_Family_Updates' ) ) {
 	require_once __DIR__ . '/class-blt-family-updates.php';
+}
+
+// Which copy actually declared them. Only the first writer sticks, which is
+// exactly the fact worth recording.
+if ( ! isset( $GLOBALS['blt_family_lib']['utilities_version'] ) ) {
+	$GLOBALS['blt_family_lib']['utilities_version'] = '1.0.0';
 }
 
 if ( ! function_exists( 'blt_family_register' ) ) {
@@ -74,8 +96,13 @@ if ( ! function_exists( 'blt_family_register' ) ) {
 	 *     @type string   $name   Human-readable plugin name, e.g. 'BLT Secure'.
 	 *     @type string   $slug   Plugin slug, e.g. 'blt-secure'.
 	 *     @type string[] $groups Shared credential groups this plugin consumes.
-	 *     @type string   $menu   Optional admin page slug to link to from the
-	 *                            family screen.
+	 *     @type string   $menu   Optional. The plugin's admin page, linked from
+	 *                            the family screen. A bare slug is resolved
+	 *                            against admin.php; pass a relative URL instead
+	 *                            when the page hangs off another parent, e.g.
+	 *                            'edit.php?post_type=event&page=blt-events-settings',
+	 *                            since WordPress dispatches a submenu callback
+	 *                            through its parent, not through admin.php.
 	 *     @type string   $version Optional plugin version, for the overview.
 	 *     @type string   $update_slug Optional. The slug the plugin's
 	 *                            plugin-update-checker instance was built with,

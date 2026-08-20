@@ -142,8 +142,17 @@ class BLT_Family_Updates {
 
 				// The scheduled daily event. Exempt: it fires once a day by
 				// definition, and holding it to a strict 24h-since-last-check
-				// would silently turn a slightly-early run into a 48h gap.
-				if ( $cron_hook === current_filter() ) {
+				// would silently turn a slightly-early run into a 48h gap —
+				// WP-Cron fires late, so the run after a late one lands inside
+				// 24 hours of it and would be dropped.
+				//
+				// doing_action(), NOT current_filter(). PUC calls this filter
+				// from inside Scheduler::maybeCheckForUpdates(), so by the time
+				// the callback runs, current_filter() is the inner
+				// puc_check_now-* filter and never the outer cron action.
+				// doing_action() asks whether the action is anywhere on the
+				// current stack, which is the question being asked here.
+				if ( doing_action( $cron_hook ) ) {
 					return true;
 				}
 
@@ -181,6 +190,11 @@ class BLT_Family_Updates {
 			return;
 		}
 
+		// For any LATER (re)schedule. It cannot help the first one: PUC applies
+		// this filter inside the Scheduler constructor, which has already run
+		// by the time buildUpdateChecker() returns and apply() is called — so
+		// on a fresh activation the event is already on the library's random
+		// past offset. The immediate re-anchor below is what corrects that.
 		$checker->addFilter(
 			'first_check_time',
 			static function () {
@@ -190,9 +204,16 @@ class BLT_Family_Updates {
 
 		$cron_hook = $checker->getUniqueName( 'cron_check_updates' );
 
-		// Re-anchoring touches the cron array, so keep it to admin requests —
-		// front-end page loads must stay free of this. An admin visits often
-		// enough, and the schedule survives in the meantime.
+		// Correct the event now, in the same request that created it. Cheap:
+		// wp_next_scheduled() reads the autoloaded 'cron' option, already in
+		// memory, and nothing is written unless the event is genuinely
+		// misaligned. Without this, a site activated outside wp-admin keeps
+		// PUC's random offset until an admin happens to load a screen.
+		self::reanchor_event( $cron_hook );
+
+		// And again on admin requests, to pick up a site timezone change (or an
+		// event some other code rescheduled). Admin-only: front-end page loads
+		// must stay free of cron-array writes.
 		add_action(
 			'admin_init',
 			static function () use ( $cron_hook ) {

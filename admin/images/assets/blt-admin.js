@@ -1,5 +1,5 @@
 /**
- * Blt Image Optimizer — admin bulk runner + connection test.
+ * BLT Image Optimizer — admin bulk runner + connection test.
  * Vanilla JS only (no jQuery).
  */
 ( function () {

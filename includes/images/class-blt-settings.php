@@ -74,6 +74,18 @@ class Settings {
 	/**
 	 * Get a single setting value.
 	 *
+	 * The Worker URL and secret fall back to the BLT family's shared
+	 * `image_worker` group when this plugin's own option is empty — BLT Optimized
+	 * and the standalone BLT Image Optimizer address the same Worker, so a site
+	 * running both only has to enter the pair once. The local value always wins,
+	 * nothing is ever written back into this plugin's option, and
+	 * BLT_Family::get() is itself gated on a per-plugin opt-in that defaults off,
+	 * so an existing site with both fields filled in behaves identically.
+	 *
+	 * Every other read of the pair funnels through here — Uploader::optimize_file(),
+	 * Uploader::test_connection() and self::is_configured() all call get() — so
+	 * upload, the health check and the status UI resolve the same way.
+	 *
 	 * @param string $key     Setting key.
 	 * @param mixed  $default Fallback when unset.
 	 * @return mixed
@@ -82,7 +94,23 @@ class Settings {
 		$all = self::all();
 
 		if ( 'worker_secret' === $key ) {
-			return self::decrypt( $all['worker_secret'] );
+			$secret = self::decrypt( $all['worker_secret'] );
+
+			if ( '' === $secret && class_exists( 'BLT_Family' ) ) {
+				$secret = \BLT_Family::get( 'blt-optimized', 'image_worker', 'worker_secret' );
+			}
+
+			return $secret;
+		}
+
+		if ( 'worker_url' === $key ) {
+			$url = isset( $all['worker_url'] ) ? (string) $all['worker_url'] : '';
+
+			if ( '' === $url && class_exists( 'BLT_Family' ) ) {
+				$url = \BLT_Family::get( 'blt-optimized', 'image_worker', 'worker_url' );
+			}
+
+			return $url;
 		}
 
 		if ( array_key_exists( $key, $all ) ) {
@@ -109,9 +137,18 @@ class Settings {
 			? esc_url_raw( trim( $input['worker_url'] ) )
 			: '';
 
-		// Preserve existing secret when the field is left blank.
+		/*
+		 * Blank means "keep what's stored", so the secret never has to be
+		 * rendered back into the page. That leaves no way to empty the field,
+		 * which matters now that an empty local secret is what lets the shared
+		 * BLT credential apply — without an explicit clear, a site with a
+		 * secret saved could never migrate to a shared one. Hence the checkbox:
+		 * blank + clear ticked is the only way to erase it.
+		 */
 		if ( isset( $input['worker_secret'] ) && '' !== trim( $input['worker_secret'] ) ) {
 			$clean['worker_secret'] = self::encrypt( trim( $input['worker_secret'] ) );
+		} elseif ( ! empty( $input['worker_secret_clear'] ) ) {
+			$clean['worker_secret'] = '';
 		} else {
 			$clean['worker_secret'] = $current['worker_secret'];
 		}

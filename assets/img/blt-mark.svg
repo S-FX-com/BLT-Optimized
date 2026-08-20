@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" role="img" aria-labelledby="blt-mark-title" fill="currentColor">
+	<title id="blt-mark-title">BLT</title>
+	<!-- Top rail: the T crossbar's upper edge, doubling as the shield's top edge. -->
+	<path d="M0 0H100V10.2H0Z"/>
+	<!-- L stem, dropping out of the top rail into the shield's centre point. -->
+	<path d="M44.8 0H58.4V69H44.8Z"/>
+	<!-- B, chamfered right shoulders, two counters punched out. -->
+	<path fill-rule="evenodd" d="M0 13H35.8L41.4 18.6V35L37.2 40.5L41.4 46V60L35.8 65.6H0ZM10 23.1H30V37.9H10ZM10 43.2H30V55H10Z"/>
+	<!-- T: shoulder and stem. -->
+	<path d="M61.8 13H100V23.6H61.8Z"/>
+	<path d="M74 23.6H84V69H74Z"/>
+	<!-- Shield foot, split by the same channels that separate the letters. -->
+	<path d="M4.8 69H41.4V94.1Z"/>
+	<path d="M44.8 69H58.4V92.3L50 100L44.8 96.4Z"/>
+	<path d="M61.8 69H84L61.8 89.2Z"/>
+</svg>

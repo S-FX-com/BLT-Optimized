@@ -1,62 +1,11 @@
-/* Blt Image Optimizer — admin styles */
-
-.blt-optimizer-wrap .blt-cards {
-	display: flex;
-	flex-wrap: wrap;
-	gap: 16px;
-	margin: 20px 0;
-}
-
-.blt-optimizer-wrap .blt-card {
-	flex: 1 1 160px;
-	background: #fff;
-	border: 1px solid #dcdcde;
-	border-radius: 6px;
-	padding: 18px 20px;
-	display: flex;
-	flex-direction: column;
-	gap: 4px;
-}
-
-.blt-card-num {
-	font-size: 28px;
-	font-weight: 600;
-	line-height: 1.1;
-	color: #1d2327;
-}
-
-.blt-card-label {
-	font-size: 13px;
-	color: #646970;
-}
-
-.blt-bulk-panel {
-	background: #fff;
-	border: 1px solid #dcdcde;
-	border-radius: 6px;
-	padding: 20px;
-	margin: 20px 0;
-}
-
-.blt-progress-bar {
-	height: 22px;
-	background: #f0f0f1;
-	border-radius: 11px;
-	overflow: hidden;
-	margin-bottom: 10px;
-}
-
-.blt-progress-fill {
-	display: block;
-	height: 100%;
-	width: 0;
-	background: linear-gradient(90deg, #2271b1, #72aee6);
-	transition: width 0.4s ease;
-}
+/* BLT Image Optimizer — admin styles.
+   Stat tiles, cards, the progress bar and the status pills now come from the
+   shared design system (assets/css/blt-design-system.css); only what it does
+   not cover lives here. */
 
 .blt-progress-text {
-	margin: 0 0 16px;
-	color: #50575e;
+	margin: 10px 0 16px;
+	color: var(--blt-fg, #1e1e1e);
 	font-weight: 500;
 }
 
@@ -72,11 +21,11 @@
 }
 
 .blt-bulk-message.error {
-	color: #b32d2e;
+	color: var(--blt-danger-fg, #8a2424);
 }
 
 .blt-bulk-message.success {
-	color: #2a7d2e;
+	color: var(--blt-success-fg, #005c12);
 }
 
 .blt-test-result {
@@ -85,54 +34,16 @@
 }
 
 .blt-test-result.ok {
-	color: #2a7d2e;
+	color: var(--blt-success-fg, #005c12);
 }
 
 .blt-test-result.fail {
-	color: #b32d2e;
-}
-
-/* Status pills */
-.blt-status {
-	display: inline-block;
-	padding: 2px 8px;
-	border-radius: 10px;
-	font-size: 12px;
-	font-weight: 600;
-}
-
-.blt-status-done {
-	background: #edfaef;
-	color: #2a7d2e;
-}
-
-.blt-status-error {
-	background: #fcf0f1;
-	color: #b32d2e;
-}
-
-.blt-status-skipped {
-	background: #f6f7f7;
-	color: #646970;
-}
-
-.blt-status-pending,
-.blt-status-processing {
-	background: #fcf9e8;
-	color: #8a6d00;
+	color: var(--blt-danger-fg, #8a2424);
 }
 
 .blt-error-msg {
 	cursor: help;
-	color: #b32d2e;
-}
-
-.blt-handoff {
-	background: #fff;
-	border: 1px solid #dcdcde;
-	border-radius: 6px;
-	padding: 14px 20px;
-	margin: 20px 0;
+	color: var(--blt-danger-fg, #8a2424);
 }
 
 .blt-handoff summary {
@@ -141,6 +52,6 @@
 }
 
 .blt-handoff ul {
-	margin: 12px 0 4px 20px;
+	margin: 12px 0 0 20px;
 	list-style: disc;
 }

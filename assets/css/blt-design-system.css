@@ -1,0 +1,728 @@
+/* ========================================
+   BLT — Shared Admin Design System
+   ========================================
+
+   The component library for every *custom* admin page in every plugin of
+   the S-FX.com BLT family (BLT Documents, BLT Events, BLT Gallery,
+   BLT M365 WP SSO, BLT Optimized, BLT Popups, BLT Secure, BLT SureCart
+   Extensions, BLT Tube). This file is maintained as one canonical copy and
+   vendored byte-identical into each plugin — edit it in one repo and port
+   the same change to the rest, never fork it per plugin.
+
+   Built on the WordPress admin design language: #2271b1 accent, #1e1e1e
+   text, #646970 muted text, #dcdcde borders, 8px card radii.
+
+   Usage: wrap a page's `.wrap` container with the `.blt-ui` class, then
+   compose the page from the components below (`.blt-card`, `.blt-field`,
+   `.blt-toggle`, `.blt-badge`, `.blt-select-card`, `.blt-callout`, ...).
+   Components are scoped under `.blt-ui` so they never leak onto post-type
+   editor screens, which sit inside WordPress's own postbox chrome (same
+   color tokens, different DOM shape).
+
+   When adding a new admin screen: reach for these classes first. Only
+   add page-specific CSS for layout that doesn't fit an existing
+   component (see DESIGN.md for the full component reference).
+   ======================================== */
+
+:root {
+	--blt-primary: #2271b1;
+	--blt-primary-hover: #135e96;
+	--blt-primary-tint: #f6fafd;
+	--blt-primary-border: #c5d9ed;
+	--blt-fg: #1e1e1e;
+	--blt-muted-fg: #646970;
+	--blt-border: #dcdcde;
+	--blt-surface: #ffffff;
+	--blt-surface-muted: #f6f7f7;
+	--blt-success-bg: #edfaef;
+	--blt-success-fg: #005c12;
+	--blt-warning-bg: #fef8ee;
+	--blt-warning-fg: #94660c;
+	--blt-danger-bg: #fcf0f1;
+	--blt-danger-fg: #8a2424;
+	--blt-neutral-bg: #f0f0f1;
+	--blt-neutral-fg: #646970;
+	--blt-radius: 8px;
+	--blt-radius-sm: 4px;
+}
+
+/* --- Page shell ---
+   Form-oriented screens (Settings, Fieldsets) stay at a readable measure.
+   Data-table screens add `.blt-ui-wide` to use the full content width —
+   WordPress already indents the content area to clear the admin sidebar,
+   so "full width" here means full width of that area, not the viewport. */
+.blt-ui {
+	max-width: 960px;
+}
+
+.blt-ui.blt-ui-wide {
+	max-width: none;
+}
+
+.blt-ui .blt-admin-page-header {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: baseline;
+	justify-content: space-between;
+	gap: 8px 16px;
+}
+
+.blt-ui .blt-admin-page-header h1 {
+	display: flex;
+	align-items: baseline;
+	gap: 8px;
+	font-size: 23px;
+	font-weight: 600;
+	color: var(--blt-fg);
+	padding: 9px 0 4px;
+}
+
+.blt-ui .blt-admin-page-header-sub {
+	font-size: 14px;
+	font-weight: 400;
+	color: var(--blt-muted-fg);
+}
+
+.blt-ui .blt-admin-page-actions {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	padding: 9px 0 4px;
+}
+
+/* --- Cards --- */
+.blt-ui .blt-card {
+	background: var(--blt-surface);
+	border: 1px solid var(--blt-border);
+	border-radius: var(--blt-radius);
+	box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
+	margin-bottom: 20px;
+	overflow: hidden;
+}
+
+.blt-ui .blt-card-header {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	gap: 6px 12px;
+	padding: 16px 24px;
+	border-bottom: 1px solid var(--blt-surface-muted);
+}
+
+.blt-ui .blt-card-header h2 {
+	margin: 0;
+	font-size: 16px;
+	font-weight: 600;
+	color: var(--blt-fg);
+	flex: 1 1 auto;
+}
+
+.blt-ui .blt-card-header p {
+	flex-basis: 100%;
+	margin: 0;
+	font-size: 13px;
+	color: var(--blt-muted-fg);
+	order: 3;
+}
+
+.blt-ui .blt-card-header-badges {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	margin-left: auto;
+}
+
+.blt-ui .blt-badge-labelled {
+	display: inline-flex;
+	align-items: center;
+	gap: 6px;
+	font-size: 12px;
+	color: var(--blt-muted-fg);
+}
+
+.blt-ui .blt-card-body {
+	padding: 20px 24px;
+}
+
+.blt-ui .blt-card-body > *:last-child {
+	margin-bottom: 0;
+}
+
+/* Tables hosted inside a card (at any nesting depth, e.g. inside a
+   WP_List_Table's <form>) lose their own border/shadow so the card
+   supplies it once, flush with the card edges. */
+.blt-ui .blt-card-body .widefat,
+.blt-ui .blt-card > .widefat {
+	border: 0;
+	box-shadow: none;
+}
+
+.blt-ui .blt-card > .widefat {
+	margin: 0;
+}
+
+/* --- Field rows --- */
+.blt-ui .blt-field {
+	display: grid;
+	grid-template-columns: 200px 1fr;
+	gap: 8px 24px;
+	padding: 10px 0;
+}
+
+.blt-ui .blt-field + .blt-field {
+	border-top: 1px solid var(--blt-surface-muted);
+}
+
+.blt-ui .blt-field-label {
+	font-size: 13px;
+	font-weight: 600;
+	color: var(--blt-fg);
+	padding-top: 6px;
+}
+
+.blt-ui .blt-field-desc {
+	margin: 6px 0 0;
+	font-size: 12px;
+	color: var(--blt-muted-fg);
+}
+
+.blt-ui input[type="text"],
+.blt-ui input[type="url"],
+.blt-ui input[type="password"],
+.blt-ui input[type="number"],
+.blt-ui select {
+	border-color: #8c8f94;
+	border-radius: 2px;
+	min-height: 32px;
+}
+
+.blt-ui input:focus,
+.blt-ui select:focus {
+	border-color: var(--blt-primary);
+	box-shadow: 0 0 0 1px var(--blt-primary);
+}
+
+/* --- Toggle switches --- */
+.blt-ui .blt-toggle-stack {
+	display: flex;
+	flex-direction: column;
+	gap: 14px;
+}
+
+.blt-ui .blt-toggle {
+	display: inline-flex;
+	align-items: flex-start;
+	gap: 10px;
+	cursor: pointer;
+}
+
+.blt-ui .blt-toggle input[type="checkbox"] {
+	position: absolute;
+	opacity: 0;
+	width: 0;
+	height: 0;
+}
+
+.blt-ui .blt-toggle-track {
+	flex-shrink: 0;
+	position: relative;
+	width: 36px;
+	height: 18px;
+	margin-top: 1px;
+	background: #fff;
+	border: 1px solid var(--blt-fg);
+	border-radius: 9px;
+	transition: background 0.15s ease, border-color 0.15s ease;
+}
+
+.blt-ui .blt-toggle-thumb {
+	position: absolute;
+	top: 2px;
+	left: 2px;
+	width: 12px;
+	height: 12px;
+	background: var(--blt-fg);
+	border-radius: 50%;
+	transition: transform 0.15s ease, background 0.15s ease;
+}
+
+.blt-ui .blt-toggle input:checked + .blt-toggle-track {
+	background: var(--blt-primary);
+	border-color: var(--blt-primary);
+}
+
+.blt-ui .blt-toggle input:checked + .blt-toggle-track .blt-toggle-thumb {
+	background: #fff;
+	transform: translateX(18px);
+}
+
+.blt-ui .blt-toggle input:focus-visible + .blt-toggle-track {
+	box-shadow: 0 0 0 2px #fff, 0 0 0 4px var(--blt-primary);
+}
+
+.blt-ui .blt-toggle-text {
+	display: flex;
+	flex-direction: column;
+	gap: 2px;
+}
+
+.blt-ui .blt-toggle-label {
+	font-size: 13px;
+	font-weight: 500;
+	color: var(--blt-fg);
+}
+
+.blt-ui .blt-toggle-desc {
+	font-size: 12px;
+	color: var(--blt-muted-fg);
+}
+
+/* --- Selectable cards (radio/checkbox card grids, e.g. picking one of
+   several options as a group) --- */
+.blt-ui .blt-select-cards {
+	display: grid;
+	grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
+	gap: 12px;
+}
+
+.blt-ui .blt-select-card {
+	position: relative;
+	display: flex;
+	flex-direction: column;
+	gap: 4px;
+	padding: 14px 16px;
+	background: var(--blt-surface);
+	border: 1px solid var(--blt-border);
+	border-radius: 6px;
+	cursor: pointer;
+	transition: border-color 0.1s ease, box-shadow 0.1s ease;
+}
+
+.blt-ui .blt-select-card:hover {
+	border-color: var(--blt-primary);
+}
+
+.blt-ui .blt-select-card input {
+	position: absolute;
+	opacity: 0;
+	width: 0;
+	height: 0;
+}
+
+.blt-ui .blt-select-card.is-selected {
+	border-color: var(--blt-primary);
+	box-shadow: 0 0 0 1px var(--blt-primary);
+	background: var(--blt-primary-tint);
+}
+
+.blt-ui .blt-select-card-check {
+	position: absolute;
+	top: 12px;
+	right: 12px;
+	width: 16px;
+	height: 16px;
+	border: 1px solid #8c8f94;
+	border-radius: 50%;
+	background: #fff;
+}
+
+.blt-ui .blt-select-card.is-selected .blt-select-card-check {
+	border-color: var(--blt-primary);
+	background: var(--blt-primary);
+	box-shadow: inset 0 0 0 3px #fff;
+}
+
+.blt-ui .blt-select-card-name {
+	font-size: 14px;
+	font-weight: 600;
+	color: var(--blt-fg);
+	padding-right: 24px;
+}
+
+.blt-ui .blt-select-card-desc {
+	font-size: 12px;
+	color: var(--blt-muted-fg);
+	line-height: 1.4;
+}
+
+/* --- Badges / status pills ---
+   Deliberately NOT scoped to .blt-ui: badges also appear inside native
+   WordPress list tables (Events, Coupons) that aren't wrapped in the
+   .blt-ui page shell. The blt- prefix keeps them collision-safe. --- */
+.blt-badge {
+	display: inline-block;
+	padding: 2px 10px;
+	border-radius: 10px;
+	font-size: 11px;
+	font-weight: 600;
+	text-transform: uppercase;
+	letter-spacing: 0.02em;
+	background: var(--blt-neutral-bg);
+	color: var(--blt-neutral-fg);
+}
+
+.blt-badge-on {
+	background: var(--blt-success-bg);
+	color: var(--blt-success-fg);
+}
+
+.blt-badge-off {
+	background: var(--blt-neutral-bg);
+	color: var(--blt-neutral-fg);
+}
+
+/* Registration / order style statuses. */
+.blt-badge-confirmed {
+	background: var(--blt-success-bg);
+	color: var(--blt-success-fg);
+}
+
+.blt-badge-pending {
+	background: var(--blt-warning-bg);
+	color: var(--blt-warning-fg);
+}
+
+.blt-badge-cancelled {
+	background: var(--blt-danger-bg);
+	color: var(--blt-danger-fg);
+}
+
+.blt-badge-refunded {
+	background: var(--blt-neutral-bg);
+	color: var(--blt-neutral-fg);
+}
+
+/* Event type badges (Events list table). */
+.blt-badge-type-online {
+	background: var(--blt-primary-tint);
+	color: var(--blt-primary);
+	border: 1px solid var(--blt-primary-border);
+}
+
+.blt-badge-type-in-person {
+	background: var(--blt-success-bg);
+	color: var(--blt-success-fg);
+}
+
+.blt-badge-type-hybrid {
+	background: var(--blt-warning-bg);
+	color: var(--blt-warning-fg);
+}
+
+/* --- Callout --- */
+.blt-ui .blt-callout {
+	display: flex;
+	flex-direction: column;
+	gap: 4px;
+	padding: 14px 20px;
+	margin-bottom: 20px;
+	background: var(--blt-primary-tint);
+	border: 1px solid var(--blt-primary-border);
+	border-left: 4px solid var(--blt-primary);
+	border-radius: 4px;
+	font-size: 13px;
+	color: var(--blt-fg);
+}
+
+/* --- Chips (small inline tags) --- */
+.blt-ui .blt-chips {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 6px;
+	margin-top: 4px;
+}
+
+.blt-ui .blt-chip {
+	padding: 2px 8px;
+	background: var(--blt-surface);
+	border: 1px solid var(--blt-primary-border);
+	border-radius: 3px;
+	font-size: 12px;
+}
+
+/* --- Redirect URI / code chips --- */
+.blt-ui .blt-redirect-uri {
+	display: inline-block;
+	padding: 5px 10px;
+	background: var(--blt-surface-muted);
+	border: 1px solid var(--blt-border);
+	border-radius: 4px;
+	word-break: break-all;
+	font-size: 12px;
+}
+
+/* --- Address autocomplete (shared: event editor + any future field
+   that needs a suggestion dropdown) --- */
+.blt-address-autocomplete {
+	position: relative;
+	max-width: 40em;
+}
+
+.blt-address-suggestions {
+	position: absolute;
+	top: 100%;
+	left: 0;
+	right: 0;
+	z-index: 1000;
+	margin: 2px 0 0;
+	padding: 0;
+	list-style: none;
+	background: #fff;
+	border: 1px solid #c3c4c7;
+	border-radius: 4px;
+	box-shadow: 0 2px 6px rgba(0, 0, 0, 0.15);
+	max-height: 220px;
+	overflow-y: auto;
+}
+
+.blt-address-suggestion {
+	margin: 0;
+	padding: 8px 10px;
+	cursor: pointer;
+	border-bottom: 1px solid #f0f0f1;
+	font-size: 13px;
+	line-height: 1.4;
+}
+
+.blt-address-suggestion:last-child {
+	border-bottom: none;
+}
+
+.blt-address-suggestion:hover,
+.blt-address-suggestion.is-active {
+	background: #f0f6fc;
+	color: #0a4b78;
+}
+
+/* --- Utilities (unscoped: also used in native list tables) --- */
+.blt-text-danger {
+	color: var(--blt-danger-fg);
+	font-weight: 600;
+}
+
+.blt-text-muted {
+	color: var(--blt-muted-fg);
+}
+
+/* Events list: attendee count cell. */
+.blt-attendee-count {
+	font-weight: 600;
+	text-decoration: none;
+}
+
+.blt-attendee-capacity {
+	font-size: 11px;
+	color: var(--blt-muted-fg);
+}
+
+/* --- Brand lockup ---
+   The BLT mark beside a page title. `assets/img/blt-mark.svg` inherits
+   currentColor, so the mark takes the heading's color for free. --- */
+.blt-ui .blt-brand-mark {
+	flex-shrink: 0;
+	width: 22px;
+	height: 22px;
+	color: var(--blt-fg);
+	align-self: center;
+}
+
+.blt-ui .blt-admin-page-header-meta {
+	display: flex;
+	align-items: center;
+	gap: 6px;
+	font-size: 12px;
+	color: var(--blt-muted-fg);
+}
+
+/* --- Tabs ---
+   Horizontal nav for a multi-section screen. Render as <a> elements so a
+   tabbed screen keeps working without JavaScript and each tab is
+   linkable/bookmarkable. --- */
+.blt-ui .blt-settings-tabs {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 4px;
+	margin: 12px 0 24px;
+	border-bottom: 1px solid var(--blt-border);
+}
+
+.blt-ui .blt-settings-tab {
+	position: relative;
+	padding: 10px 16px;
+	font-size: 14px;
+	font-weight: 500;
+	color: var(--blt-fg);
+	text-decoration: none;
+	border-radius: 4px 4px 0 0;
+	transition: background 0.1s ease, color 0.1s ease;
+}
+
+.blt-ui .blt-settings-tab:hover {
+	background: var(--blt-surface-muted);
+	color: var(--blt-primary);
+}
+
+.blt-ui .blt-settings-tab:focus {
+	box-shadow: 0 0 0 2px var(--blt-primary);
+	outline: none;
+}
+
+.blt-ui .blt-settings-tab.is-active {
+	color: var(--blt-primary);
+	font-weight: 600;
+}
+
+.blt-ui .blt-settings-tab.is-active::after {
+	content: "";
+	position: absolute;
+	left: 0;
+	right: 0;
+	bottom: -1px;
+	height: 3px;
+	background: var(--blt-primary);
+	border-radius: 3px 3px 0 0;
+}
+
+/* --- Save bar --- */
+.blt-ui .blt-settings-footer {
+	display: flex;
+	align-items: center;
+	justify-content: flex-end;
+	gap: 12px;
+	padding: 4px 0 24px;
+}
+
+.blt-ui .blt-settings-footer .blt-save-button {
+	min-height: 36px;
+	padding: 0 20px;
+	border-radius: 3px;
+}
+
+/* --- Stat tiles ---
+   A row of headline numbers (disk usage, counts, savings). Keep the label
+   above the value so a long label never pushes the number out of line. --- */
+.blt-ui .blt-stats {
+	display: grid;
+	grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+	gap: 12px;
+}
+
+.blt-ui .blt-stat {
+	display: flex;
+	flex-direction: column;
+	gap: 4px;
+	padding: 14px 16px;
+	background: var(--blt-surface-muted);
+	border: 1px solid var(--blt-border);
+	border-radius: 6px;
+}
+
+.blt-ui .blt-stat-label {
+	font-size: 11px;
+	font-weight: 600;
+	text-transform: uppercase;
+	letter-spacing: 0.02em;
+	color: var(--blt-muted-fg);
+}
+
+.blt-ui .blt-stat-value {
+	font-size: 22px;
+	font-weight: 600;
+	line-height: 1.1;
+	color: var(--blt-fg);
+}
+
+.blt-ui .blt-stat-sub {
+	font-size: 12px;
+	color: var(--blt-muted-fg);
+}
+
+/* --- Progress bar --- */
+.blt-ui .blt-progress {
+	height: 8px;
+	background: var(--blt-neutral-bg);
+	border-radius: 4px;
+	overflow: hidden;
+}
+
+.blt-ui .blt-progress-fill {
+	height: 100%;
+	background: var(--blt-primary);
+	border-radius: 4px;
+	transition: width 0.3s ease;
+}
+
+/* --- Empty state --- */
+.blt-ui .blt-empty {
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	gap: 8px;
+	padding: 48px 24px;
+	text-align: center;
+	color: var(--blt-muted-fg);
+}
+
+.blt-ui .blt-empty-title {
+	font-size: 15px;
+	font-weight: 600;
+	color: var(--blt-fg);
+}
+
+/* --- Inline code / value chips --- */
+.blt-ui .blt-code {
+	display: block;
+	padding: 12px 14px;
+	background: var(--blt-surface-muted);
+	border: 1px solid var(--blt-border);
+	border-radius: 4px;
+	font-size: 12px;
+	line-height: 1.6;
+	white-space: pre-wrap;
+	word-break: break-word;
+}
+
+/* --- Toolbar (filters/search above a table inside a card) --- */
+.blt-ui .blt-toolbar {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	gap: 8px 12px;
+	padding: 12px 24px;
+	background: var(--blt-surface-muted);
+	border-bottom: 1px solid var(--blt-border);
+}
+
+.blt-ui .blt-toolbar-spacer {
+	margin-left: auto;
+}
+
+/* --- Small layout utilities ---
+   Enough to keep a composed page free of inline style attributes. --- */
+.blt-ui .blt-card-body + .blt-card-body {
+	border-top: 1px solid var(--blt-surface-muted);
+}
+
+.blt-ui .blt-stack-top {
+	margin-top: 12px;
+}
+
+.blt-ui .blt-error-list {
+	margin: 0.5em 0 0.5em 2em;
+	list-style: disc;
+}
+
+/* --- Responsive --- */
+@media (max-width: 782px) {
+	.blt-ui .blt-field {
+		grid-template-columns: 1fr;
+		gap: 4px;
+	}
+
+	.blt-ui .blt-card-header,
+	.blt-ui .blt-card-body,
+	.blt-ui .blt-toolbar {
+		padding-left: 16px;
+		padding-right: 16px;
+	}
+}

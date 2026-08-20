@@ -1,6 +1,6 @@
 # BLT Optimized
 
-WordPress disk & database optimization plugin by [S-FX.com Small Business Solutions](https://s-fx.com).
+WordPress disk & database optimization plugin by [S-FX.com](https://www.s-fx.com).
 
 Most optimization plugins treat database bloat as the whole problem. In practice, what actually eats a shared-hosting quota is sitting in `wp-content`: backup archives nobody deleted, cache directories from a long-replaced caching plugin, a `debug.log` growing for years, or a folder left over from a plugin deleted via FTP. BLT Optimized's differentiator is the **disk-usage forensics layer** — a real folder-by-folder breakdown of `wp-content` — with database cleanup and optimization included as the secondary feature.
 
@@ -8,7 +8,7 @@ Works standalone with zero external dependency. Handoff clients get full value f
 
 ### Optional: image-optimization module (v1.1)
 
-BLT Optimized also bundles an **optional image-optimization module** (off by default), merged in from the former standalone *Blt Image Optimizer* plugin. It permanently optimizes images on disk — compression + WebP conversion — by routing them through a self-hosted Cloudflare Worker (`worker/`), then rewrites front-end URLs/srcset to serve the `.webp`.
+BLT Optimized also bundles an **optional image-optimization module** (off by default), merged in from the former standalone *BLT Image Optimizer* plugin. It permanently optimizes images on disk — compression + WebP conversion — by routing them through a self-hosted Cloudflare Worker (`worker/`), then rewrites front-end URLs/srcset to serve the `.webp`.
 
 - Enable under **Settings → Image optimization** (setting key `enable_images`). When off, no image code runs and no image table/options are created — the disk/DB core keeps its zero-dependency guarantee.
 - Self-contained under the `BltImageOptimizer\` namespace in `includes/images/` + `admin/images/`, with its own log table (`{prefix}blt_optimizer_log`) and settings option (`blt_optimizer_settings` — note: one letter off from the core's `blt_optimized_settings`, kept intentionally distinct).
@@ -58,7 +58,9 @@ Dry-run preview → confirm → execute → logged, for: orphaned postmeta / use
 
 - **Background processing:** Action Scheduler is used when present (`as_enqueue_async_action`, e.g. bundled with WooCommerce); otherwise chained WP-Cron single events. Interactive scans are additionally driven by AJAX polling from the open admin page, so they progress regardless. This resolves the "bundle vs. rely on Woo" open question in favor of *rely when present, degrade to WP-Cron* — no vendored copy to keep patched.
 - **Tables:** `wp_blt_optimized_scans` (scan tree; includes `run_id`, `item_type`, `flags` beyond the spec's baseline columns) and `wp_blt_optimized_audit_log`.
-- **Updates:** [plugin-update-checker](https://github.com/YahnisElsts/plugin-update-checker) v5.x, GitHub-hosted, guarded require — see `plugin-update-checker/README-VENDOR.md` for the vendoring step.
+- **Updates:** [plugin-update-checker](https://github.com/YahnisElsts/plugin-update-checker) v5.x, GitHub-hosted, guarded require — see `plugin-update-checker/README-VENDOR.md` for the vendoring step. The BLT family policy (`BLT_Family_Updates`) caps automatic checks at one a day, anchored to midnight site time; manual checks — the Plugins-row link, Dashboard → Updates, and **Check for Updates** on this plugin's Settings screen — always run immediately.
+- **Shared settings (`includes/blt-family/`):** the BLT family layer, vendored byte-identical into every BLT plugin. It supplies the admin-menu mark, the update policy, and one encrypted store of shared connection settings. This plugin declares the `github` and `image_worker` groups, so on a site running another BLT plugin the GitHub update token and the image Worker URL/secret can be entered once. Reads are fallbacks only: wp-config constant → this plugin's own option → shared store, and the shared store is consulted only after the site owner opts that group in on the BLT screen (off by default). Never edit this directory in one repo alone.
+- **Admin design system:** custom screens are composed from `assets/css/blt-design-system.css` (the shared `.blt-ui` component library — see `DESIGN.md`), enqueued on this plugin's own screens only. `assets/admin.css` and `admin/images/assets/blt-admin.css` now hold only what the shared file does not cover.
 - **Multisite:** deferred beyond flagging `uploads/sites/*` (per spec open question).
 - **MSP Mode (Cloudflare central reporting):** Phase 2 / v2.0 — intentionally not in this codebase yet. The `blt_optimized_after_scan` action receives the compact scan summary that a future `class-blt-optimized-reporter.php` will POST to the Worker endpoint.
 

@@ -152,10 +152,25 @@ class Admin {
 			return;
 		}
 
+		// Shared BLT design system — this module's own screens only, never the
+		// dashboard. Declared as a dependency of the page stylesheet so the
+		// page-specific rules cascade last.
+		$style_deps = array();
+
+		if ( false !== strpos( $hook, self::MENU_SLUG ) ) {
+			wp_enqueue_style(
+				'blt-optimized-design-system',
+				BLT_OPTIMIZER_URL . 'assets/css/blt-design-system.css',
+				array(),
+				BLT_OPTIMIZER_VERSION
+			);
+			$style_deps[] = 'blt-optimized-design-system';
+		}
+
 		wp_enqueue_style(
 			'blt-optimizer-admin',
 			BLT_OPTIMIZER_URL . 'admin/images/assets/blt-admin.css',
-			array(),
+			$style_deps,
 			BLT_OPTIMIZER_VERSION
 		);
 
@@ -384,7 +399,7 @@ class Admin {
 
 		wp_add_dashboard_widget(
 			'blt_optimizer_widget',
-			__( 'Blt Image Optimizer', 'blt-image-optimizer' ),
+			__( 'BLT Image Optimizer', 'blt-image-optimizer' ),
 			array( $this, 'render_dashboard_widget' )
 		);
 	}

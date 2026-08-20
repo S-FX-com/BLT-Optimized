@@ -98,6 +98,16 @@ $toggles = array(
 						<p class="blt-field-desc">
 							<?php esc_html_e( 'Shared bearer secret. Sent as Authorization: Bearer header. Stored encrypted at rest. Leave blank to keep the current secret.', 'blt-image-optimizer' ); ?>
 						</p>
+						<?php if ( $has_secret ) : ?>
+							<p class="blt-field-desc">
+								<label>
+									<input type="checkbox" name="blt_settings[worker_secret_clear]" value="1" />
+									<?php esc_html_e( 'Clear the saved secret', 'blt-image-optimizer' ); ?>
+								</label>
+								<br />
+								<?php esc_html_e( 'Only needed to hand this over to a shared BLT credential: this plugin\'s own secret always wins, so the shared one applies only once nothing is stored here.', 'blt-image-optimizer' ); ?>
+							</p>
+						<?php endif; ?>
 						<p class="blt-stack-top">
 							<button type="button" class="button" id="blt-test-connection"><?php esc_html_e( 'Test Connection', 'blt-image-optimizer' ); ?></button>
 							<span id="blt-test-result" class="blt-test-result"></span>

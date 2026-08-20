@@ -1,4 +1,4 @@
-# Wrangler configuration for the Blt Image Optimizer Worker.
+# Wrangler configuration for the BLT Image Optimizer Worker.
 #
 # IMPORTANT: cf.image transformations require deployment to a Cloudflare ZONE
 # ROUTE with Image Transformations enabled — NOT a *.workers.dev subdomain.

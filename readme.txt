@@ -4,7 +4,7 @@ Tags: disk usage, database optimization, cleanup, orphaned data, autoload, webp,
 Requires at least: 6.0
 Tested up to: 6.8
 Requires PHP: 8.0
-Stable tag: 1.1.3
+Stable tag: 1.2.0
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -74,12 +74,18 @@ Scans run in time-boxed batches and the partial state is persisted between ticks
 
 == Changelog ==
 
+= 1.2.0 =
+* Adopted the shared BLT admin design system across every screen: consistent page headers, cards, field rows, toggles, status badges and stat tiles.
+* The admin menu now carries the BLT mark instead of a generic dashicon.
+* Update checks now follow the BLT family policy: at most one automatic check a day, anchored to midnight site time, with manual checks always immediate. Settings gained a "Check for Updates" action and the time of the last check.
+* Joined the BLT shared settings layer. On a site running another BLT plugin, the GitHub update token and the image Worker URL/secret can be entered once and shared — opt-in per plugin, off by default, and this plugin's own settings always win.
+
 = 1.1.3 =
 * Image optimization is now easier to find: when the module is off, an admin notice on the plugin's screens links straight to the toggle (dismissible per user).
 * When the module is on, its Image Optimizer, Image Settings, and Image Log pages now appear in the shared tab strip alongside the disk/DB pages. The module remains off by default.
 
 = 1.1.0 =
-* New optional image-optimization module (merged in from the former standalone Blt Image Optimizer plugin): compress + WebP conversion via a self-hosted Cloudflare Worker, auto-optimize on upload, bulk runner, and front-end WebP URL/srcset rewriting.
+* New optional image-optimization module (merged in from the former standalone BLT Image Optimizer plugin): compress + WebP conversion via a self-hosted Cloudflare Worker, auto-optimize on upload, bulk runner, and front-end WebP URL/srcset rewriting.
 * The module is off by default and toggled under Settings → Image optimization; the disk/DB core stays standalone with zero external dependency when it is off.
 * Bundled the image Cloudflare Worker under `worker/` for deployment.
 

@@ -119,8 +119,8 @@
 				{ label: 'Registered image sizes', value: summary.image_sizes ? summary.image_sizes.count + '× crops per upload' : '—' }
 			];
 			var html = cards.map( function ( card ) {
-				return '<div class="blt-card"><span class="blt-card-label">' + escapeHtml( card.label ) +
-					'</span><span class="blt-card-value">' + escapeHtml( card.value ) + '</span></div>';
+				return '<div class="blt-stat"><span class="blt-stat-label">' + escapeHtml( card.label ) +
+					'</span><span class="blt-stat-value">' + escapeHtml( card.value ) + '</span></div>';
 			} ).join( '' );
 			$( '#blt-scan-summary' ).html( html );
 		},
@@ -172,8 +172,8 @@
 					var html = '<div class="blt-node" data-path="' + escapeHtml( row.path ) + '">';
 					html += '<div class="blt-node-row' + ( hasKids ? ' blt-node-row-expandable' : '' ) + '" style="padding-left:' + ( depth * 22 ) + 'px">';
 					html += hasKids
-						? '<button type="button" class="blt-toggle" aria-expanded="false" aria-label="' + escapeHtml( 'Toggle ' + name ) + '">▸</button>'
-						: '<span class="blt-toggle blt-toggle-empty"></span>';
+						? '<button type="button" class="blt-tree-toggle" aria-expanded="false" aria-label="' + escapeHtml( 'Toggle ' + name ) + '">▸</button>'
+						: '<span class="blt-tree-toggle blt-tree-toggle-empty"></span>';
 					html += '<span class="blt-node-name ' + ( 'file' === row.type ? 'blt-is-file' : '' ) + '">' + escapeHtml( name ) + '</span>';
 					html += '<span class="blt-node-flags">' + scan.flagBadges( row.flags, labels ) + '</span>';
 					html += '<span class="blt-node-files">' + escapeHtml( row.files ) + ' files</span>';
@@ -197,7 +197,7 @@
 				if ( $( event.target ).closest( 'a' ).length ) {
 					return;
 				}
-				var $button = $( this ).children( '.blt-toggle' ).first();
+				var $button = $( this ).children( '.blt-tree-toggle' ).first();
 				var $kids = $( this ).closest( '.blt-node' ).children( '.blt-children' );
 				var open = 'true' === $button.attr( 'aria-expanded' );
 				$button.attr( 'aria-expanded', open ? 'false' : 'true' ).text( open ? '▸' : '▾' );
@@ -444,8 +444,8 @@
 				{ label: 'MyISAM tables', value: data.myisamCount }
 			];
 			$( '#blt-db-summary' ).html( cards.map( function ( card ) {
-				return '<div class="blt-card"><span class="blt-card-label">' + escapeHtml( card.label ) +
-					'</span><span class="blt-card-value">' + escapeHtml( card.value ) + '</span></div>';
+				return '<div class="blt-stat"><span class="blt-stat-label">' + escapeHtml( card.label ) +
+					'</span><span class="blt-stat-value">' + escapeHtml( card.value ) + '</span></div>';
 			} ).join( '' ) );
 		},
 

@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" role="img" aria-labelledby="blt-menu-mark-title" fill="currentColor">
+	<title id="blt-menu-mark-title">BLT</title>
+	<!--
+	  Pixel-hinted twin of blt-mark.svg, drawn on a 20-unit grid so every edge
+	  lands on a whole pixel at the 20x20 size WordPress paints admin menu
+	  icons at. The full-detail mark anti-aliases into mud at that size; this
+	  one stays crisp. Same silhouette, chamfers and hairline channels dropped.
+	-->
+	<path d="M0 0h20v2H0Z"/>
+	<path d="M9 0h3v14H9Z"/>
+	<path fill-rule="evenodd" d="M0 3h8v10H0ZM2 5h4v2H2ZM2 9h4v2H2Z"/>
+	<path d="M13 3h7v2h-7Z"/>
+	<path d="M15 5h3v9h-3Z"/>
+	<path d="M0 14h8v5Z"/>
+	<path d="M9 14h3v4l-1.5 2L9 18.5Z"/>
+	<path d="M13 14h5l-5 5Z"/>
+</svg>

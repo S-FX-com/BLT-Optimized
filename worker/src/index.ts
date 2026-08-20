@@ -1,5 +1,5 @@
 /**
- * Blt Image Optimizer — Cloudflare Worker
+ * BLT Image Optimizer — Cloudflare Worker
  *
  * Hosted on the S-FX Cloudflare account. One Worker serves all client sites.
  * Accepts an image URL, applies cf.image transforms (WebP conversion,

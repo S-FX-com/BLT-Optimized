@@ -3,11 +3,11 @@
  * Plugin Name:       BLT Optimized
  * Plugin URI:        https://github.com/S-FX-com/BLT-Optimized
  * Description:       Disk-usage forensics and database optimization for WordPress — folder-by-folder wp-content size breakdown, orphaned data cleanup, and table optimization. Includes an optional image-optimization module (compress + WebP via a self-hosted Cloudflare Worker). Disk/DB core is standalone with zero external dependency.
- * Version:           1.1.3
+ * Version:           1.2.0
  * Requires at least: 6.0
  * Requires PHP:      8.0
- * Author:            S-FX.com Small Business Solutions
- * Author URI:        https://s-fx.com
+ * Author:            S-FX.com
+ * Author URI:        https://www.s-fx.com
  * License:           GPL-2.0-or-later
  * License URI:       https://www.gnu.org/licenses/gpl-2.0.html
  * Text Domain:       blt-optimized
@@ -17,10 +17,37 @@
 
 defined( 'ABSPATH' ) || exit;
 
-define( 'BLT_OPTIMIZED_VERSION', '1.1.3' );
+define( 'BLT_OPTIMIZED_VERSION', '1.2.0' );
 define( 'BLT_OPTIMIZED_FILE', __FILE__ );
 define( 'BLT_OPTIMIZED_DIR', plugin_dir_path( __FILE__ ) );
 define( 'BLT_OPTIMIZED_URL', plugin_dir_url( __FILE__ ) );
+define( 'BLT_OPTIMIZED_BASENAME', plugin_basename( __FILE__ ) );
+
+/**
+ * BLT family shared settings layer.
+ *
+ * A drop-in library vendored byte-identical into every BLT plugin; the newest
+ * copy present on the site wins and boots exactly once. Registration happens
+ * here, during load and before `plugins_loaded`, so the registry is complete
+ * when the library elects a copy. Requiring it also makes BLT_Family_Brand and
+ * BLT_Family_Updates available to the update checker built further down — both
+ * load eagerly from the bootstrap for exactly that reason.
+ *
+ * Nothing here boots the optional image module; that still happens only when
+ * the `enable_images` setting is on.
+ */
+require_once BLT_OPTIMIZED_DIR . 'includes/blt-family/bootstrap.php';
+
+blt_family_register(
+	BLT_OPTIMIZED_FILE,
+	array(
+		'name'    => 'BLT Optimized',
+		'slug'    => 'blt-optimized',
+		'version' => BLT_OPTIMIZED_VERSION,
+		'menu'    => 'blt-optimized',
+		'groups'  => array( 'github', 'image_worker' ),
+	)
+);
 
 require_once BLT_OPTIMIZED_DIR . 'includes/class-blt-optimized-audit-log.php';
 require_once BLT_OPTIMIZED_DIR . 'includes/class-blt-optimized-scanner.php';
@@ -31,7 +58,7 @@ require_once BLT_OPTIMIZED_DIR . 'includes/class-blt-optimized-admin.php';
 /**
  * Image-optimization module (optional).
  *
- * The module was originally the standalone "Blt Image Optimizer" plugin. It is
+ * The module was originally the standalone "BLT Image Optimizer" plugin. It is
  * self-contained under the BltImageOptimizer namespace and is only booted when
  * the `enable_images` setting is on (see BLT_Optimized::boot_images()), so the
  * disk/DB core keeps its zero-external-dependency guarantee when the module is
@@ -42,7 +69,7 @@ define( 'BLT_OPTIMIZER_VERSION', BLT_OPTIMIZED_VERSION );
 define( 'BLT_OPTIMIZER_DIR', BLT_OPTIMIZED_DIR );
 define( 'BLT_OPTIMIZER_URL', BLT_OPTIMIZED_URL );
 define( 'BLT_OPTIMIZER_FILE', BLT_OPTIMIZED_FILE );
-define( 'BLT_OPTIMIZER_BASENAME', plugin_basename( BLT_OPTIMIZED_FILE ) );
+define( 'BLT_OPTIMIZER_BASENAME', BLT_OPTIMIZED_BASENAME );
 
 /**
  * Autoloader for the BltImageOptimizer namespace.
@@ -87,10 +114,14 @@ spl_autoload_register(
 if ( file_exists( BLT_OPTIMIZED_DIR . 'plugin-update-checker/plugin-update-checker.php' ) ) {
 	require_once BLT_OPTIMIZED_DIR . 'plugin-update-checker/plugin-update-checker.php';
 
+	// The 4th argument is the check period in hours. It must be 24 (the family
+	// policy): a checker built with 0 registers no scheduler hooks at all and
+	// cannot be revived after the fact.
 	$blt_optimized_update_checker = \YahnisElsts\PluginUpdateChecker\v5\PucFactory::buildUpdateChecker(
 		'https://github.com/S-FX-com/BLT-Optimized/',
 		__FILE__,
-		'blt-optimized'
+		'blt-optimized',
+		24
 	);
 	$blt_optimized_update_checker->setBranch( 'main' );
 
@@ -104,7 +135,44 @@ if ( file_exists( BLT_OPTIMIZED_DIR . 'plugin-update-checker/plugin-update-check
 	// define( 'BLT_OPTIMIZED_GITHUB_TOKEN', '...' );
 	if ( defined( 'BLT_OPTIMIZED_GITHUB_TOKEN' ) && BLT_OPTIMIZED_GITHUB_TOKEN ) {
 		$blt_optimized_update_checker->setAuthentication( BLT_OPTIMIZED_GITHUB_TOKEN );
+	} else {
+		/*
+		 * No wp-config constant, so fall back to the family's shared `github`
+		 * token. The read is deferred to plugins_loaded because BLT_Family only
+		 * exists once the library has elected a copy (plugins_loaded priority
+		 * 0) — later than this file runs — and every plugin-update-checker code
+		 * path that needs the credential runs later still. Precedence is
+		 * unchanged: wp-config constant first, shared store only when it is
+		 * absent or empty. BLT_Family::get() is gated on a per-plugin opt-in
+		 * that defaults off, so this cannot change behaviour on its own.
+		 */
+		add_action(
+			'plugins_loaded',
+			static function () use ( $blt_optimized_update_checker ) {
+				if ( ! class_exists( 'BLT_Family' ) ) {
+					return;
+				}
+
+				$token = BLT_Family::get( 'blt-optimized', 'github', 'token' );
+
+				if ( '' !== $token ) {
+					$blt_optimized_update_checker->setAuthentication( $token );
+				}
+			},
+			1
+		);
 	}
+
+	// The shared family update policy: at most one automatic check a day,
+	// anchored to 00:00 site time, manual checks always immediate, and the BLT
+	// mark on the plugin's card in the update screens.
+	BLT_Family_Updates::apply(
+		$blt_optimized_update_checker,
+		array(
+			'basename'  => BLT_OPTIMIZED_BASENAME,
+			'icons_url' => BLT_OPTIMIZED_URL . 'assets/img/',
+		)
+	);
 }
 
 /**

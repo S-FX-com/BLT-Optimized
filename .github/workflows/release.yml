@@ -90,6 +90,8 @@ jobs:
             --exclude='build' \
             --exclude='node_modules' \
             --exclude='*.zip' \
+            --exclude='/blt-family-smoke.php' \
+            --exclude='/DESIGN.md' \
             ./ "$build_dir/"
           (cd build && zip -r "../blt-optimized-${new}.zip" blt-optimized)
 

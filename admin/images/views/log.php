@@ -27,9 +27,28 @@ $filters = array(
 	'skipped' => __( 'Skipped', 'blt-image-optimizer' ),
 	'pending' => __( 'Pending', 'blt-image-optimizer' ),
 );
+
+// Per-row status pill, mapped onto the shared design system's badge palette.
+$badges = array(
+	'done'       => 'blt-badge-on',
+	'error'      => 'blt-badge-cancelled',
+	'skipped'    => 'blt-badge-off',
+	'pending'    => 'blt-badge-pending',
+	'processing' => 'blt-badge-pending',
+);
 ?>
-<div class="wrap blt-optimizer-wrap">
-	<h1><?php esc_html_e( 'Blt Image Optimizer — Log', 'blt-image-optimizer' ); ?></h1>
+<div class="wrap blt-ui blt-ui-wide blt-optimizer-wrap">
+	<div class="blt-admin-page-header">
+		<h1>
+			<?php
+			if ( class_exists( '\\BLT_Family_Brand' ) ) {
+				// Pre-built, KSES-sanitized SVG from the shared brand helper.
+				echo \BLT_Family_Brand::inline_mark( BLT_OPTIMIZER_DIR ); // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped
+			}
+			?>
+			<?php esc_html_e( 'BLT Image Optimizer — Log', 'blt-image-optimizer' ); ?>
+		</h1>
+	</div>
 
 	<?php if ( class_exists( '\\BLT_Optimized_Admin' ) ) { \BLT_Optimized_Admin::render_tabs( 'blt-optimizer-log' ); } ?>
 
@@ -47,6 +66,7 @@ $filters = array(
 		<?php endforeach; ?>
 	</ul>
 
+	<div class="blt-card">
 	<table class="wp-list-table widefat fixed striped">
 		<thead>
 			<tr>
@@ -61,7 +81,12 @@ $filters = array(
 		</thead>
 		<tbody>
 			<?php if ( empty( $rows ) ) : ?>
-				<tr><td colspan="7"><?php esc_html_e( 'No log entries yet.', 'blt-image-optimizer' ); ?></td></tr>
+				<tr><td colspan="7">
+					<div class="blt-empty">
+						<span class="blt-empty-title"><?php esc_html_e( 'No log entries yet', 'blt-image-optimizer' ); ?></span>
+						<span><?php esc_html_e( 'Optimized sizes are recorded here as the bulk runner works through the library.', 'blt-image-optimizer' ); ?></span>
+					</div>
+				</td></tr>
 			<?php else : ?>
 				<?php foreach ( $rows as $row ) : ?>
 					<tr>
@@ -78,7 +103,7 @@ $filters = array(
 						</td>
 						<td><code><?php echo esc_html( $row->size_name ); ?></code></td>
 						<td>
-							<span class="blt-status blt-status-<?php echo esc_attr( $row->status ); ?>">
+							<span class="blt-badge <?php echo esc_attr( $badges[ $row->status ] ?? 'blt-badge-off' ); ?>">
 								<?php echo esc_html( ucfirst( $row->status ) ); ?>
 							</span>
 							<?php if ( 'error' === $row->status && $row->error_message ) : ?>
@@ -94,6 +119,7 @@ $filters = array(
 			<?php endif; ?>
 		</tbody>
 	</table>
+	</div>
 
 	<?php if ( $total_pages > 1 ) : ?>
 		<div class="tablenav">

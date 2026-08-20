@@ -74,6 +74,18 @@ class Settings {
 	/**
 	 * Get a single setting value.
 	 *
+	 * The Worker URL and secret fall back to the BLT family's shared
+	 * `image_worker` group when this plugin's own option is empty — BLT Optimized
+	 * and the standalone BLT Image Optimizer address the same Worker, so a site
+	 * running both only has to enter the pair once. The local value always wins,
+	 * nothing is ever written back into this plugin's option, and
+	 * BLT_Family::get() is itself gated on a per-plugin opt-in that defaults off,
+	 * so an existing site with both fields filled in behaves identically.
+	 *
+	 * Every other read of the pair funnels through here — Uploader::optimize_file(),
+	 * Uploader::test_connection() and self::is_configured() all call get() — so
+	 * upload, the health check and the status UI resolve the same way.
+	 *
 	 * @param string $key     Setting key.
 	 * @param mixed  $default Fallback when unset.
 	 * @return mixed
@@ -82,7 +94,23 @@ class Settings {
 		$all = self::all();
 
 		if ( 'worker_secret' === $key ) {
-			return self::decrypt( $all['worker_secret'] );
+			$secret = self::decrypt( $all['worker_secret'] );
+
+			if ( '' === $secret && class_exists( 'BLT_Family' ) ) {
+				$secret = \BLT_Family::get( 'blt-optimized', 'image_worker', 'worker_secret' );
+			}
+
+			return $secret;
+		}
+
+		if ( 'worker_url' === $key ) {
+			$url = isset( $all['worker_url'] ) ? (string) $all['worker_url'] : '';
+
+			if ( '' === $url && class_exists( 'BLT_Family' ) ) {
+				$url = \BLT_Family::get( 'blt-optimized', 'image_worker', 'worker_url' );
+			}
+
+			return $url;
 		}
 
 		if ( array_key_exists( $key, $all ) ) {

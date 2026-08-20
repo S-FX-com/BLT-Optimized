@@ -100,9 +100,15 @@ class BLT_Optimized_Admin {
 				self::CAPABILITY,
 				'blt-optimized',
 				array( $this, 'render_scan_page' ),
-				'dashicons-chart-pie',
+				BLT_Family_Brand::menu_icon( BLT_OPTIMIZED_DIR ),
 				81
 			);
+
+			// WordPress paints an SVG icon_url as a background image and never
+			// recolours it, so — unlike a dashicon — it cannot brighten on hover
+			// or while the section is open. This restores that.
+			add_action( 'admin_head', array( $this, 'print_menu_icon_style' ) );
+
 			foreach ( $pages as $slug => $page ) {
 				add_submenu_page( 'blt-optimized', $page[0], $page[0], self::CAPABILITY, $slug, array( $this, $page[1] ) );
 			}
@@ -129,6 +135,17 @@ class BLT_Optimized_Admin {
 				}
 			}
 		}
+	}
+
+	/**
+	 * Brighten the BLT mark in the admin menu on hover / while open.
+	 *
+	 * Hooked from register_menu() only when the top-level menu is registered.
+	 *
+	 * @return void
+	 */
+	public function print_menu_icon_style() {
+		BLT_Family_Brand::print_menu_icon_style( 'blt-optimized' );
 	}
 
 	/**
@@ -165,12 +182,12 @@ class BLT_Optimized_Admin {
 	 * @return void
 	 */
 	public static function render_tabs( $current ) {
-		echo '<nav class="nav-tab-wrapper blt-nav-tabs">';
+		echo '<nav class="blt-settings-tabs blt-nav-tabs">';
 		foreach ( self::nav_tabs() as $slug => $label ) {
 			$url    = menu_page_url( $slug, false );
-			$active = ( $slug === $current ) ? ' nav-tab-active' : '';
+			$active = ( $slug === $current ) ? ' is-active' : '';
 			printf(
-				'<a href="%1$s" class="nav-tab%2$s">%3$s</a>',
+				'<a href="%1$s" class="blt-settings-tab%2$s">%3$s</a>',
 				esc_url( $url ),
 				esc_attr( $active ),
 				esc_html( $label )
@@ -282,7 +299,12 @@ class BLT_Optimized_Admin {
 			return;
 		}
 
-		wp_enqueue_style( 'blt-optimized-admin', BLT_OPTIMIZED_URL . 'assets/admin.css', array(), BLT_OPTIMIZED_VERSION );
+		// Shared BLT design system. Loaded on this plugin's own screens only,
+		// and declared as a dependency of the page stylesheet so the
+		// page-specific rules always cascade last.
+		wp_enqueue_style( 'blt-optimized-design-system', BLT_OPTIMIZED_URL . 'assets/css/blt-design-system.css', array(), BLT_OPTIMIZED_VERSION );
+
+		wp_enqueue_style( 'blt-optimized-admin', BLT_OPTIMIZED_URL . 'assets/admin.css', array( 'blt-optimized-design-system' ), BLT_OPTIMIZED_VERSION );
 		wp_enqueue_script( 'blt-optimized-admin', BLT_OPTIMIZED_URL . 'assets/admin.js', array( 'jquery' ), BLT_OPTIMIZED_VERSION, true );
 
 		wp_localize_script(
@@ -704,6 +726,16 @@ class BLT_Optimized_Admin {
 	/* ------------------------------------------------------------------ */
 
 	/**
+	 * Print the BLT mark for a page header.
+	 *
+	 * @return void
+	 */
+	private function brand_mark() {
+		// Pre-built, KSES-sanitized SVG from the shared brand helper.
+		echo BLT_Family_Brand::inline_mark( BLT_OPTIMIZED_DIR ); // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped
+	}
+
+	/**
 	 * Disk usage page.
 	 */
 	public function render_scan_page() {
@@ -711,8 +743,21 @@ class BLT_Optimized_Admin {
 		$du      = $this->plugin->scanner->du_available();
 		$export  = wp_nonce_url( admin_url( 'admin-post.php?action=blt_optimized_export_scan_csv' ), self::NONCE_ACTION );
 		?>
-		<div class="wrap blt-optimized-wrap">
-			<h1><?php esc_html_e( 'BLT Optimized — Disk Usage', 'blt-optimized' ); ?></h1>
+		<div class="wrap blt-ui blt-ui-wide blt-optimized-wrap">
+			<div class="blt-admin-page-header">
+				<h1>
+					<?php $this->brand_mark(); ?>
+					<?php esc_html_e( 'BLT Optimized — Disk Usage', 'blt-optimized' ); ?>
+				</h1>
+				<div class="blt-admin-page-actions">
+					<button type="button" class="button button-primary" id="blt-scan-start"><?php esc_html_e( 'Scan Now', 'blt-optimized' ); ?></button>
+					<button type="button" class="button" id="blt-scan-cancel" style="display:none;"><?php esc_html_e( 'Cancel', 'blt-optimized' ); ?></button>
+					<?php if ( $summary ) : ?>
+						<a class="button" href="<?php echo esc_url( $export ); ?>"><?php esc_html_e( 'Export CSV', 'blt-optimized' ); ?></a>
+					<?php endif; ?>
+					<span id="blt-scan-progress" class="blt-scan-status"></span>
+				</div>
+			</div>
 			<?php $this->render_nav_tabs( 'blt-optimized' ); ?>
 			<p class="description">
 				<?php esc_html_e( 'Folder-by-folder breakdown of wp-content, with known space hogs flagged. wp-admin and wp-includes are reported as single reference figures.', 'blt-optimized' ); ?>
@@ -723,29 +768,32 @@ class BLT_Optimized_Admin {
 				<?php endif; ?>
 			</p>
 
-			<div class="blt-toolbar">
-				<button type="button" class="button button-primary" id="blt-scan-start"><?php esc_html_e( 'Scan Now', 'blt-optimized' ); ?></button>
-				<button type="button" class="button" id="blt-scan-cancel" style="display:none;"><?php esc_html_e( 'Cancel', 'blt-optimized' ); ?></button>
-				<?php if ( $summary ) : ?>
-					<a class="button" href="<?php echo esc_url( $export ); ?>"><?php esc_html_e( 'Export CSV', 'blt-optimized' ); ?></a>
-				<?php endif; ?>
-				<span id="blt-scan-progress" class="blt-progress"></span>
-			</div>
-
-			<div id="blt-scan-summary" class="blt-cards"></div>
+			<div id="blt-scan-summary" class="blt-stats"></div>
 
 			<div class="blt-columns">
 				<div class="blt-col-main">
-					<h2><?php esc_html_e( 'Folder tree', 'blt-optimized' ); ?></h2>
-					<div id="blt-tree" class="blt-tree"><p class="description"><?php echo $summary ? esc_html__( 'Loading…', 'blt-optimized' ) : esc_html__( 'No scan yet. Click "Scan Now" to run the first scan.', 'blt-optimized' ); ?></p></div>
+					<div class="blt-card">
+						<div class="blt-card-header">
+							<h2><?php esc_html_e( 'Folder tree', 'blt-optimized' ); ?></h2>
+						</div>
+						<div id="blt-tree" class="blt-card-body blt-tree"><p class="description"><?php echo $summary ? esc_html__( 'Loading…', 'blt-optimized' ) : esc_html__( 'No scan yet. Click "Scan Now" to run the first scan.', 'blt-optimized' ); ?></p></div>
+					</div>
 				</div>
 				<div class="blt-col-side">
-					<h2><?php esc_html_e( 'Top 20 space hogs', 'blt-optimized' ); ?></h2>
-					<div id="blt-top-hogs"></div>
+					<div class="blt-card">
+						<div class="blt-card-header">
+							<h2><?php esc_html_e( 'Top 20 space hogs', 'blt-optimized' ); ?></h2>
+						</div>
+						<div id="blt-top-hogs" class="blt-card-body"></div>
+					</div>
 
-					<h2><?php esc_html_e( 'Top 20 largest files', 'blt-optimized' ); ?></h2>
-					<p class="description"><?php esc_html_e( 'The single biggest individual files found during the scan — regardless of folder.', 'blt-optimized' ); ?></p>
-					<div id="blt-top-files"></div>
+					<div class="blt-card">
+						<div class="blt-card-header">
+							<h2><?php esc_html_e( 'Top 20 largest files', 'blt-optimized' ); ?></h2>
+							<p><?php esc_html_e( 'The single biggest individual files found during the scan — regardless of folder.', 'blt-optimized' ); ?></p>
+						</div>
+						<div id="blt-top-files" class="blt-card-body"></div>
+					</div>
 				</div>
 			</div>
 		</div>
@@ -757,19 +805,27 @@ class BLT_Optimized_Admin {
 	 */
 	public function render_cleanup_page() {
 		?>
-		<div class="wrap blt-optimized-wrap">
-			<h1><?php esc_html_e( 'BLT Optimized — Database Cleanup', 'blt-optimized' ); ?></h1>
+		<div class="wrap blt-ui blt-ui-wide blt-optimized-wrap">
+			<div class="blt-admin-page-header">
+				<h1>
+					<?php $this->brand_mark(); ?>
+					<?php esc_html_e( 'BLT Optimized — Database Cleanup', 'blt-optimized' ); ?>
+				</h1>
+			</div>
 			<?php $this->render_nav_tabs( 'blt-optimized-cleanup' ); ?>
 			<p class="description"><?php esc_html_e( 'Everything below is a dry-run preview by default. Nothing is deleted until you explicitly run a category, and every run is written to the audit log.', 'blt-optimized' ); ?></p>
-			<div class="blt-toolbar blt-cleanup-toolbar">
-				<select id="blt-cleanup-bulk-action" class="blt-bulk-action">
-					<option value=""><?php esc_html_e( 'Bulk actions', 'blt-optimized' ); ?></option>
-					<option value="clean"><?php esc_html_e( 'Clean up', 'blt-optimized' ); ?></option>
-				</select>
-				<button type="button" class="button" id="blt-cleanup-bulk-apply"><?php esc_html_e( 'Apply', 'blt-optimized' ); ?></button>
-				<button type="button" class="button button-primary" id="blt-cleanup-refresh"><?php esc_html_e( 'Refresh previews', 'blt-optimized' ); ?></button>
+			<div class="blt-card">
+				<div class="blt-toolbar blt-cleanup-toolbar">
+					<select id="blt-cleanup-bulk-action" class="blt-bulk-action">
+						<option value=""><?php esc_html_e( 'Bulk actions', 'blt-optimized' ); ?></option>
+						<option value="clean"><?php esc_html_e( 'Clean up', 'blt-optimized' ); ?></option>
+					</select>
+					<button type="button" class="button" id="blt-cleanup-bulk-apply"><?php esc_html_e( 'Apply', 'blt-optimized' ); ?></button>
+					<span class="blt-toolbar-spacer"></span>
+					<button type="button" class="button button-primary" id="blt-cleanup-refresh"><?php esc_html_e( 'Refresh previews', 'blt-optimized' ); ?></button>
+				</div>
+				<div id="blt-cleanup-list" class="blt-card-body"><p class="description"><?php esc_html_e( 'Loading previews…', 'blt-optimized' ); ?></p></div>
 			</div>
-			<div id="blt-cleanup-list"><p class="description"><?php esc_html_e( 'Loading previews…', 'blt-optimized' ); ?></p></div>
 		</div>
 		<?php
 	}
@@ -779,21 +835,34 @@ class BLT_Optimized_Admin {
 	 */
 	public function render_db_page() {
 		?>
-		<div class="wrap blt-optimized-wrap">
-			<h1><?php esc_html_e( 'BLT Optimized — Database Optimization', 'blt-optimized' ); ?></h1>
-			<?php $this->render_nav_tabs( 'blt-optimized-db' ); ?>
-			<div id="blt-db-summary" class="blt-cards"></div>
-
-			<h2><?php esc_html_e( 'Autoloaded options', 'blt-optimized' ); ?></h2>
-			<p class="description"><?php esc_html_e( 'Autoloaded options are read on every single request. A bloated autoload set is the most common cause of slow wp-admin. Options over 100 KB are flagged.', 'blt-optimized' ); ?></p>
-			<div id="blt-autoload"></div>
-
-			<h2><?php esc_html_e( 'Tables', 'blt-optimized' ); ?></h2>
-			<p class="description"><?php esc_html_e( 'MyISAM tables benefit most from OPTIMIZE. OPTIMIZE on InnoDB rebuilds the table and briefly locks it — large InnoDB tables warn before running. Remaining MyISAM tables are flagged for InnoDB conversion.', 'blt-optimized' ); ?></p>
-			<div class="blt-toolbar">
-				<button type="button" class="button button-primary" id="blt-optimize-selected"><?php esc_html_e( 'Optimize selected', 'blt-optimized' ); ?></button>
+		<div class="wrap blt-ui blt-ui-wide blt-optimized-wrap">
+			<div class="blt-admin-page-header">
+				<h1>
+					<?php $this->brand_mark(); ?>
+					<?php esc_html_e( 'BLT Optimized — Database Optimization', 'blt-optimized' ); ?>
+				</h1>
 			</div>
-			<div id="blt-tables"><p class="description"><?php esc_html_e( 'Loading…', 'blt-optimized' ); ?></p></div>
+			<?php $this->render_nav_tabs( 'blt-optimized-db' ); ?>
+			<div id="blt-db-summary" class="blt-stats"></div>
+
+			<div class="blt-card blt-stack-top">
+				<div class="blt-card-header">
+					<h2><?php esc_html_e( 'Autoloaded options', 'blt-optimized' ); ?></h2>
+					<p><?php esc_html_e( 'Autoloaded options are read on every single request. A bloated autoload set is the most common cause of slow wp-admin. Options over 100 KB are flagged.', 'blt-optimized' ); ?></p>
+				</div>
+				<div id="blt-autoload" class="blt-card-body"></div>
+			</div>
+
+			<div class="blt-card">
+				<div class="blt-card-header">
+					<h2><?php esc_html_e( 'Tables', 'blt-optimized' ); ?></h2>
+					<p><?php esc_html_e( 'MyISAM tables benefit most from OPTIMIZE. OPTIMIZE on InnoDB rebuilds the table and briefly locks it — large InnoDB tables warn before running. Remaining MyISAM tables are flagged for InnoDB conversion.', 'blt-optimized' ); ?></p>
+				</div>
+				<div class="blt-toolbar">
+					<button type="button" class="button button-primary" id="blt-optimize-selected"><?php esc_html_e( 'Optimize selected', 'blt-optimized' ); ?></button>
+				</div>
+				<div id="blt-tables" class="blt-card-body"><p class="description"><?php esc_html_e( 'Loading…', 'blt-optimized' ); ?></p></div>
+			</div>
 		</div>
 		<?php
 	}
@@ -805,41 +874,53 @@ class BLT_Optimized_Admin {
 		$entries = $this->plugin->audit_log->get_entries( 200 );
 		$export  = wp_nonce_url( admin_url( 'admin-post.php?action=blt_optimized_export_audit_csv' ), self::NONCE_ACTION );
 		?>
-		<div class="wrap blt-optimized-wrap">
-			<h1><?php esc_html_e( 'BLT Optimized — Audit Log', 'blt-optimized' ); ?></h1>
-			<?php $this->render_nav_tabs( 'blt-optimized-audit' ); ?>
-			<div class="blt-toolbar">
-				<a class="button" href="<?php echo esc_url( $export ); ?>"><?php esc_html_e( 'Export CSV', 'blt-optimized' ); ?></a>
+		<div class="wrap blt-ui blt-ui-wide blt-optimized-wrap">
+			<div class="blt-admin-page-header">
+				<h1>
+					<?php $this->brand_mark(); ?>
+					<?php esc_html_e( 'BLT Optimized — Audit Log', 'blt-optimized' ); ?>
+				</h1>
+				<div class="blt-admin-page-actions">
+					<a class="button" href="<?php echo esc_url( $export ); ?>"><?php esc_html_e( 'Export CSV', 'blt-optimized' ); ?></a>
+				</div>
 			</div>
-			<table class="widefat striped">
-				<thead>
-					<tr>
-						<th><?php esc_html_e( 'When (UTC)', 'blt-optimized' ); ?></th>
-						<th><?php esc_html_e( 'Action', 'blt-optimized' ); ?></th>
-						<th><?php esc_html_e( 'Details', 'blt-optimized' ); ?></th>
-						<th><?php esc_html_e( 'Reclaimed', 'blt-optimized' ); ?></th>
-						<th><?php esc_html_e( 'Rows', 'blt-optimized' ); ?></th>
-						<th><?php esc_html_e( 'User', 'blt-optimized' ); ?></th>
-					</tr>
-				</thead>
-				<tbody>
-					<?php if ( empty( $entries ) ) : ?>
-						<tr><td colspan="6"><?php esc_html_e( 'No entries yet.', 'blt-optimized' ); ?></td></tr>
-					<?php else : ?>
-						<?php foreach ( $entries as $entry ) : ?>
-							<?php $user = get_userdata( (int) $entry['user_id'] ); ?>
+			<?php $this->render_nav_tabs( 'blt-optimized-audit' ); ?>
+			<div class="blt-card">
+				<?php if ( empty( $entries ) ) : ?>
+					<div class="blt-card-body">
+						<div class="blt-empty">
+							<span class="blt-empty-title"><?php esc_html_e( 'No entries yet', 'blt-optimized' ); ?></span>
+							<span><?php esc_html_e( 'Cleanup and optimization runs are recorded here.', 'blt-optimized' ); ?></span>
+						</div>
+					</div>
+				<?php else : ?>
+					<table class="widefat striped">
+						<thead>
 							<tr>
-								<td><?php echo esc_html( $entry['created_at'] ); ?></td>
-								<td><code><?php echo esc_html( $entry['action'] ); ?></code></td>
-								<td><?php echo esc_html( $entry['details'] ); ?></td>
-								<td><?php echo esc_html( $entry['bytes_reclaimed'] > 0 ? size_format( (int) $entry['bytes_reclaimed'] ) : '—' ); ?></td>
-								<td><?php echo esc_html( number_format_i18n( (int) $entry['rows_affected'] ) ); ?></td>
-								<td><?php echo esc_html( $user ? $user->user_login : ( $entry['user_id'] ? '#' . $entry['user_id'] : __( 'system', 'blt-optimized' ) ) ); ?></td>
+								<th><?php esc_html_e( 'When (UTC)', 'blt-optimized' ); ?></th>
+								<th><?php esc_html_e( 'Action', 'blt-optimized' ); ?></th>
+								<th><?php esc_html_e( 'Details', 'blt-optimized' ); ?></th>
+								<th><?php esc_html_e( 'Reclaimed', 'blt-optimized' ); ?></th>
+								<th><?php esc_html_e( 'Rows', 'blt-optimized' ); ?></th>
+								<th><?php esc_html_e( 'User', 'blt-optimized' ); ?></th>
 							</tr>
-						<?php endforeach; ?>
-					<?php endif; ?>
-				</tbody>
-			</table>
+						</thead>
+						<tbody>
+							<?php foreach ( $entries as $entry ) : ?>
+								<?php $user = get_userdata( (int) $entry['user_id'] ); ?>
+								<tr>
+									<td><?php echo esc_html( $entry['created_at'] ); ?></td>
+									<td><code><?php echo esc_html( $entry['action'] ); ?></code></td>
+									<td><?php echo esc_html( $entry['details'] ); ?></td>
+									<td><?php echo esc_html( $entry['bytes_reclaimed'] > 0 ? size_format( (int) $entry['bytes_reclaimed'] ) : '—' ); ?></td>
+									<td><?php echo esc_html( number_format_i18n( (int) $entry['rows_affected'] ) ); ?></td>
+									<td><?php echo esc_html( $user ? $user->user_login : ( $entry['user_id'] ? '#' . $entry['user_id'] : __( 'system', 'blt-optimized' ) ) ); ?></td>
+								</tr>
+							<?php endforeach; ?>
+						</tbody>
+					</table>
+				<?php endif; ?>
+			</div>
 		</div>
 		<?php
 	}
@@ -849,78 +930,158 @@ class BLT_Optimized_Admin {
 	 */
 	public function render_settings_page() {
 		$settings = BLT_Optimized::get_settings();
+
+		// The update checker is built at global scope in the main plugin file,
+		// and is absent on a checkout where plugin-update-checker has not been
+		// vendored yet — hence the guards.
+		global $blt_optimized_update_checker;
+		$last_check = ( isset( $blt_optimized_update_checker ) && is_object( $blt_optimized_update_checker ) )
+			? BLT_Family_Updates::last_check_time( $blt_optimized_update_checker )
+			: 0;
 		?>
-		<div class="wrap blt-optimized-wrap">
-			<h1><?php esc_html_e( 'BLT Optimized — Settings', 'blt-optimized' ); ?></h1>
+		<div class="wrap blt-ui blt-optimized-wrap">
+			<div class="blt-admin-page-header">
+				<h1>
+					<?php $this->brand_mark(); ?>
+					<?php esc_html_e( 'BLT Optimized — Settings', 'blt-optimized' ); ?>
+				</h1>
+			</div>
 			<?php $this->render_nav_tabs( 'blt-optimized-settings' ); ?>
 			<form method="post" action="options.php">
 				<?php settings_fields( 'blt_optimized_settings_group' ); ?>
-				<table class="form-table" role="presentation">
-					<tr>
-						<th scope="row"><?php esc_html_e( 'Menu location', 'blt-optimized' ); ?></th>
-						<td>
-							<fieldset>
-								<label>
-									<input type="checkbox" name="<?php echo esc_attr( BLT_Optimized::OPTION_SETTINGS ); ?>[show_top_menu]" value="1" <?php checked( ! empty( $settings['show_top_menu'] ) ); ?> />
-									<?php esc_html_e( 'Show top-level admin menu', 'blt-optimized' ); ?>
-								</label>
-								<br />
-								<label>
-									<input type="checkbox" name="<?php echo esc_attr( BLT_Optimized::OPTION_SETTINGS ); ?>[show_tools_menu]" value="1" <?php checked( ! empty( $settings['show_tools_menu'] ) ); ?> />
-									<?php esc_html_e( 'Show under the Tools menu', 'blt-optimized' ); ?>
-								</label>
-								<p class="description"><?php esc_html_e( 'Choose where BLT Optimized appears in wp-admin. If neither is checked, the top-level menu is kept so the plugin stays reachable.', 'blt-optimized' ); ?></p>
-							</fieldset>
-						</td>
-					</tr>
-					<tr>
-						<th scope="row"><?php esc_html_e( 'Image optimization', 'blt-optimized' ); ?></th>
-						<td>
-							<fieldset>
-								<label>
-									<input type="checkbox" name="<?php echo esc_attr( BLT_Optimized::OPTION_SETTINGS ); ?>[enable_images]" value="1" <?php checked( ! empty( $settings['enable_images'] ) ); ?> />
-									<?php esc_html_e( 'Enable the image-optimization module (compress + WebP)', 'blt-optimized' ); ?>
-								</label>
-								<p class="description">
-									<?php esc_html_e( 'Adds Image Optimizer, Image Settings, and Image Log pages to this menu. Requires a self-hosted Cloudflare Worker (configure it under Image Settings). Leaving this off keeps BLT Optimized fully standalone with no external dependency.', 'blt-optimized' ); ?>
-								</p>
-							</fieldset>
-						</td>
-					</tr>
-					<tr>
-						<th scope="row"><label for="blt-scan-schedule"><?php esc_html_e( 'Scheduled auto-scan', 'blt-optimized' ); ?></label></th>
-						<td>
-							<select id="blt-scan-schedule" name="<?php echo esc_attr( BLT_Optimized::OPTION_SETTINGS ); ?>[scan_schedule]">
-								<option value="disabled" <?php selected( $settings['scan_schedule'], 'disabled' ); ?>><?php esc_html_e( 'Disabled', 'blt-optimized' ); ?></option>
-								<option value="weekly" <?php selected( $settings['scan_schedule'], 'weekly' ); ?>><?php esc_html_e( 'Weekly', 'blt-optimized' ); ?></option>
-								<option value="monthly" <?php selected( $settings['scan_schedule'], 'monthly' ); ?>><?php esc_html_e( 'Monthly', 'blt-optimized' ); ?></option>
-							</select>
-							<p class="description"><?php esc_html_e( 'Runs the disk scan in the background on a schedule.', 'blt-optimized' ); ?></p>
-						</td>
-					</tr>
-					<tr>
-						<th scope="row"><label for="blt-revision-retention"><?php esc_html_e( 'Revisions to keep per post', 'blt-optimized' ); ?></label></th>
-						<td>
-							<input type="number" min="0" max="100" id="blt-revision-retention" name="<?php echo esc_attr( BLT_Optimized::OPTION_SETTINGS ); ?>[revision_retention]" value="<?php echo esc_attr( $settings['revision_retention'] ); ?>" class="small-text" />
-						</td>
-					</tr>
-					<tr>
-						<th scope="row"><label for="blt-trash-age"><?php esc_html_e( 'Trash / spam age threshold (days)', 'blt-optimized' ); ?></label></th>
-						<td>
-							<input type="number" min="0" max="365" id="blt-trash-age" name="<?php echo esc_attr( BLT_Optimized::OPTION_SETTINGS ); ?>[trash_age_days]" value="<?php echo esc_attr( $settings['trash_age_days'] ); ?>" class="small-text" />
-							<p class="description"><?php esc_html_e( 'Trashed posts and spam/trashed comments older than this are eligible for cleanup.', 'blt-optimized' ); ?></p>
-						</td>
-					</tr>
-					<tr>
-						<th scope="row"><label for="blt-exclusions"><?php esc_html_e( 'Excluded paths', 'blt-optimized' ); ?></label></th>
-						<td>
-							<textarea id="blt-exclusions" name="<?php echo esc_attr( BLT_Optimized::OPTION_SETTINGS ); ?>[exclusions]" rows="6" class="large-text code" placeholder="wp-content/uploads/client-archive&#10;wp-content/*/keep-me"><?php echo esc_textarea( $settings['exclusions'] ); ?></textarea>
-							<p class="description"><?php esc_html_e( 'One per line, relative to the WordPress root. Wildcards (*) supported. These paths are always skipped by the scanner.', 'blt-optimized' ); ?></p>
-						</td>
-					</tr>
-				</table>
-				<?php submit_button(); ?>
+
+				<div class="blt-card">
+					<div class="blt-card-header">
+						<h2><?php esc_html_e( 'Menu location', 'blt-optimized' ); ?></h2>
+						<p><?php esc_html_e( 'Choose where BLT Optimized appears in wp-admin. If neither is checked, the top-level menu is kept so the plugin stays reachable.', 'blt-optimized' ); ?></p>
+					</div>
+					<div class="blt-card-body">
+						<div class="blt-toggle-stack">
+							<label class="blt-toggle">
+								<input type="checkbox" name="<?php echo esc_attr( BLT_Optimized::OPTION_SETTINGS ); ?>[show_top_menu]" value="1" <?php checked( ! empty( $settings['show_top_menu'] ) ); ?> />
+								<span class="blt-toggle-track" aria-hidden="true"><span class="blt-toggle-thumb"></span></span>
+								<span class="blt-toggle-text">
+									<span class="blt-toggle-label"><?php esc_html_e( 'Show top-level admin menu', 'blt-optimized' ); ?></span>
+								</span>
+							</label>
+							<label class="blt-toggle">
+								<input type="checkbox" name="<?php echo esc_attr( BLT_Optimized::OPTION_SETTINGS ); ?>[show_tools_menu]" value="1" <?php checked( ! empty( $settings['show_tools_menu'] ) ); ?> />
+								<span class="blt-toggle-track" aria-hidden="true"><span class="blt-toggle-thumb"></span></span>
+								<span class="blt-toggle-text">
+									<span class="blt-toggle-label"><?php esc_html_e( 'Show under the Tools menu', 'blt-optimized' ); ?></span>
+								</span>
+							</label>
+						</div>
+					</div>
+				</div>
+
+				<div class="blt-card">
+					<div class="blt-card-header">
+						<h2><?php esc_html_e( 'Image optimization', 'blt-optimized' ); ?></h2>
+						<div class="blt-card-header-badges">
+							<?php if ( ! empty( $settings['enable_images'] ) ) : ?>
+								<span class="blt-badge blt-badge-on"><?php esc_html_e( 'Enabled', 'blt-optimized' ); ?></span>
+							<?php else : ?>
+								<span class="blt-badge blt-badge-off"><?php esc_html_e( 'Disabled', 'blt-optimized' ); ?></span>
+							<?php endif; ?>
+						</div>
+					</div>
+					<div class="blt-card-body">
+						<label class="blt-toggle">
+							<input type="checkbox" name="<?php echo esc_attr( BLT_Optimized::OPTION_SETTINGS ); ?>[enable_images]" value="1" <?php checked( ! empty( $settings['enable_images'] ) ); ?> />
+							<span class="blt-toggle-track" aria-hidden="true"><span class="blt-toggle-thumb"></span></span>
+							<span class="blt-toggle-text">
+								<span class="blt-toggle-label"><?php esc_html_e( 'Enable the image-optimization module (compress + WebP)', 'blt-optimized' ); ?></span>
+								<span class="blt-toggle-desc"><?php esc_html_e( 'Adds Image Optimizer, Image Settings, and Image Log pages to this menu. Requires a self-hosted Cloudflare Worker (configure it under Image Settings). Leaving this off keeps BLT Optimized fully standalone with no external dependency.', 'blt-optimized' ); ?></span>
+							</span>
+						</label>
+					</div>
+				</div>
+
+				<div class="blt-card">
+					<div class="blt-card-header">
+						<h2><?php esc_html_e( 'Scanning and cleanup', 'blt-optimized' ); ?></h2>
+					</div>
+					<div class="blt-card-body">
+						<div class="blt-field">
+							<div class="blt-field-label"><label for="blt-scan-schedule"><?php esc_html_e( 'Scheduled auto-scan', 'blt-optimized' ); ?></label></div>
+							<div>
+								<select id="blt-scan-schedule" name="<?php echo esc_attr( BLT_Optimized::OPTION_SETTINGS ); ?>[scan_schedule]">
+									<option value="disabled" <?php selected( $settings['scan_schedule'], 'disabled' ); ?>><?php esc_html_e( 'Disabled', 'blt-optimized' ); ?></option>
+									<option value="weekly" <?php selected( $settings['scan_schedule'], 'weekly' ); ?>><?php esc_html_e( 'Weekly', 'blt-optimized' ); ?></option>
+									<option value="monthly" <?php selected( $settings['scan_schedule'], 'monthly' ); ?>><?php esc_html_e( 'Monthly', 'blt-optimized' ); ?></option>
+								</select>
+								<p class="blt-field-desc"><?php esc_html_e( 'Runs the disk scan in the background on a schedule.', 'blt-optimized' ); ?></p>
+							</div>
+						</div>
+						<div class="blt-field">
+							<div class="blt-field-label"><label for="blt-revision-retention"><?php esc_html_e( 'Revisions to keep per post', 'blt-optimized' ); ?></label></div>
+							<div>
+								<input type="number" min="0" max="100" id="blt-revision-retention" name="<?php echo esc_attr( BLT_Optimized::OPTION_SETTINGS ); ?>[revision_retention]" value="<?php echo esc_attr( $settings['revision_retention'] ); ?>" class="small-text" />
+							</div>
+						</div>
+						<div class="blt-field">
+							<div class="blt-field-label"><label for="blt-trash-age"><?php esc_html_e( 'Trash / spam age threshold (days)', 'blt-optimized' ); ?></label></div>
+							<div>
+								<input type="number" min="0" max="365" id="blt-trash-age" name="<?php echo esc_attr( BLT_Optimized::OPTION_SETTINGS ); ?>[trash_age_days]" value="<?php echo esc_attr( $settings['trash_age_days'] ); ?>" class="small-text" />
+								<p class="blt-field-desc"><?php esc_html_e( 'Trashed posts and spam/trashed comments older than this are eligible for cleanup.', 'blt-optimized' ); ?></p>
+							</div>
+						</div>
+						<div class="blt-field">
+							<div class="blt-field-label"><label for="blt-exclusions"><?php esc_html_e( 'Excluded paths', 'blt-optimized' ); ?></label></div>
+							<div>
+								<textarea id="blt-exclusions" name="<?php echo esc_attr( BLT_Optimized::OPTION_SETTINGS ); ?>[exclusions]" rows="6" class="large-text code" placeholder="wp-content/uploads/client-archive&#10;wp-content/*/keep-me"><?php echo esc_textarea( $settings['exclusions'] ); ?></textarea>
+								<p class="blt-field-desc"><?php esc_html_e( 'One per line, relative to the WordPress root. Wildcards (*) supported. These paths are always skipped by the scanner.', 'blt-optimized' ); ?></p>
+							</div>
+						</div>
+					</div>
+				</div>
+
+				<div class="blt-settings-footer">
+					<?php submit_button( null, 'primary blt-save-button', 'submit', false ); ?>
+				</div>
 			</form>
+
+			<?php
+			/*
+			 * Updates. The automatic check runs once a day, anchored to 00:00
+			 * site time by BLT_Family_Updates; the link below is the manual
+			 * path, which bypasses that floor and checks immediately.
+			 */
+			?>
+			<div class="blt-card">
+				<div class="blt-card-header">
+					<h2><?php esc_html_e( 'Updates', 'blt-optimized' ); ?></h2>
+					<p><?php esc_html_e( 'BLT Optimized updates from its own GitHub releases. The automatic check runs once a day, at midnight site time; this link checks immediately.', 'blt-optimized' ); ?></p>
+				</div>
+				<div class="blt-card-body">
+					<div class="blt-field">
+						<div class="blt-field-label"><?php esc_html_e( 'Version', 'blt-optimized' ); ?></div>
+						<div>
+							<?php echo esc_html( BLT_OPTIMIZED_VERSION ); ?>
+							<p class="blt-field-desc">
+								<?php
+								if ( $last_check > 0 ) {
+									printf(
+										/* translators: %s: human-readable time difference, e.g. "2 hours". */
+										esc_html__( 'Last checked %s ago.', 'blt-optimized' ),
+										esc_html( human_time_diff( $last_check ) )
+									);
+								} else {
+									esc_html_e( 'No update check has run yet.', 'blt-optimized' );
+								}
+								?>
+							</p>
+						</div>
+					</div>
+					<div class="blt-field">
+						<div class="blt-field-label"><?php esc_html_e( 'Check now', 'blt-optimized' ); ?></div>
+						<div>
+							<a class="button" href="<?php echo esc_url( BLT_Family_Updates::check_now_url( 'blt-optimized' ) ); ?>"><?php esc_html_e( 'Check for Updates', 'blt-optimized' ); ?></a>
+						</div>
+					</div>
+				</div>
+			</div>
 		</div>
 		<?php
 	}

@@ -66,6 +66,13 @@ class BLT_Optimized_Findings {
 	);
 
 	/**
+	 * Summary findings that restate other findings (PageSpeed's overall
+	 * score is the sum of its individual audits, which are scored on their
+	 * own) — shown, but never deducted twice.
+	 */
+	const UNSCORED_IDS = array( 'psi.score' );
+
+	/**
 	 * Evidence rows kept per finding.
 	 */
 	const MAX_ROWS = 50;
@@ -243,7 +250,7 @@ class BLT_Optimized_Findings {
 		}
 
 		foreach ( $findings as $finding ) {
-			if ( isset( $dismissed[ $finding['key'] ] ) || 'pass' === $finding['severity'] ) {
+			if ( isset( $dismissed[ $finding['key'] ] ) || 'pass' === $finding['severity'] || in_array( $finding['id'], self::UNSCORED_IDS, true ) ) {
 				continue;
 			}
 			$category = $finding['category'];

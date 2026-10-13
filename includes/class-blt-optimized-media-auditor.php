@@ -201,6 +201,7 @@ class BLT_Optimized_Media_Auditor {
 		$state = $this->load_state();
 		if ( 'running' === $state['status'] ) {
 			$state['status']      = 'cancelled';
+			$state['stage']       = '';
 			$state['queue']       = array();
 			$state['cursor']      = array();
 			$state['work']        = self::default_work();
@@ -319,27 +320,39 @@ class BLT_Optimized_Media_Auditor {
 		$total = (int) $state['folders_total'];
 		$done  = (int) $state['folders_done'];
 
-		switch ( $state['stage'] ) {
-			case 'folders':
-				$progress = $total > 0 ? (int) floor( 60 * min( 1, $done / $total ) ) : 0;
-				/* translators: %s: uploads folder such as 2026/10. */
-				$message = ! empty( $state['queue'] ) ? sprintf( __( 'Scanning uploads/%s', 'blt-optimized' ), $state['queue'][0] ) : __( 'Scanning uploads folders', 'blt-optimized' );
-				break;
-			case 'dups':
-				$progress = 65;
-				$message  = __( 'Comparing files to find duplicates', 'blt-optimized' );
-				break;
-			case 'refs':
-				$progress = 75;
-				$message  = __( 'Reading where media is used in content', 'blt-optimized' );
-				break;
-			case 'unattached':
-				$progress = 85;
-				$message  = __( 'Checking unattached media', 'blt-optimized' );
-				break;
-			default:
-				$progress = 'completed' === $state['status'] ? 100 : 0;
-				$message  = 'completed' === $state['status'] ? __( 'Media audit complete', 'blt-optimized' ) : '';
+		$current = '';
+		if ( ! empty( $state['cursor']['folder'] ) ) {
+			$current = (string) $state['cursor']['folder'];
+		} elseif ( ! empty( $state['queue'] ) ) {
+			$current = (string) $state['queue'][0];
+		}
+
+		if ( 'running' !== $state['status'] ) {
+			$progress = 'completed' === $state['status'] ? 100 : 0;
+			$message  = 'completed' === $state['status'] ? __( 'Media audit complete', 'blt-optimized' ) : '';
+		} else {
+			switch ( $state['stage'] ) {
+				case 'folders':
+					$progress = $total > 0 ? (int) floor( 60 * min( 1, $done / $total ) ) : 0;
+					/* translators: %s: uploads folder such as 2026/10. */
+					$message = '' !== $current ? sprintf( __( 'Scanning uploads/%s', 'blt-optimized' ), $current ) : __( 'Scanning uploads folders', 'blt-optimized' );
+					break;
+				case 'dups':
+					$progress = 65;
+					$message  = __( 'Comparing files to find duplicates', 'blt-optimized' );
+					break;
+				case 'refs':
+					$progress = 75;
+					$message  = __( 'Reading where media is used in content', 'blt-optimized' );
+					break;
+				case 'unattached':
+					$progress = 85;
+					$message  = __( 'Checking unattached media', 'blt-optimized' );
+					break;
+				default:
+					$progress = 90;
+					$message  = __( 'Finishing the media audit', 'blt-optimized' );
+			}
 		}
 
 		return array(
@@ -1405,7 +1418,7 @@ class BLT_Optimized_Media_Auditor {
 		);
 
 		$state['status']        = 'completed';
-		$state['stage']         = '';
+		$state['stage']         = 'done';
 		$state['finished_at']   = time();
 		$state['files_checked'] = (int) $w['files_checked'];
 		$state['queue']       = array();

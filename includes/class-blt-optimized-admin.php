@@ -1104,7 +1104,7 @@ class BLT_Optimized_Admin {
 							<div>
 								<input type="password" autocomplete="off" id="blt-psi-key" name="<?php echo esc_attr( BLT_Optimized::OPTION_SETTINGS ); ?>[psi_api_key]" value="<?php echo esc_attr( $settings['psi_api_key'] ); ?>" class="regular-text" />
 								<p class="blt-field-desc">
-									<?php esc_html_e( 'Optional but recommended — without a key Google rate-limits requests heavily.', 'blt-optimized' ); ?>
+									<?php esc_html_e( 'Effectively required: Google\'s shared keyless quota is usually exhausted, so requests without a key fail. The key is free and only needs the PageSpeed Insights API enabled.', 'blt-optimized' ); ?>
 									<a href="https://developers.google.com/speed/docs/insights/v5/get-started" target="_blank" rel="noopener noreferrer"><?php esc_html_e( 'Get a free key', 'blt-optimized' ); ?></a>
 								</p>
 							</div>

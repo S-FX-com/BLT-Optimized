@@ -24,6 +24,18 @@ define( 'BLT_OPTIMIZED_URL', plugin_dir_url( __FILE__ ) );
 define( 'BLT_OPTIMIZED_BASENAME', plugin_basename( __FILE__ ) );
 
 /**
+ * Front-end profiler.
+ *
+ * Loaded and started before anything else so the profiled request's timing
+ * and plugin-load measurements begin as early as a regular plugin can. On
+ * every request that does not carry a valid one-time profile token this is a
+ * single isset() check and returns immediately.
+ */
+require_once BLT_OPTIMIZED_DIR . 'includes/class-blt-optimized-components.php';
+require_once BLT_OPTIMIZED_DIR . 'includes/class-blt-optimized-profiler.php';
+BLT_Optimized_Profiler::maybe_start();
+
+/**
  * BLT family shared settings layer.
  *
  * A drop-in library vendored byte-identical into every BLT plugin; the newest
@@ -53,6 +65,16 @@ require_once BLT_OPTIMIZED_DIR . 'includes/class-blt-optimized-audit-log.php';
 require_once BLT_OPTIMIZED_DIR . 'includes/class-blt-optimized-scanner.php';
 require_once BLT_OPTIMIZED_DIR . 'includes/class-blt-optimized-cleaner.php';
 require_once BLT_OPTIMIZED_DIR . 'includes/class-blt-optimized-db-optimizer.php';
+require_once BLT_OPTIMIZED_DIR . 'includes/class-blt-optimized-findings.php';
+require_once BLT_OPTIMIZED_DIR . 'includes/class-blt-optimized-health-checks.php';
+require_once BLT_OPTIMIZED_DIR . 'includes/class-blt-optimized-page-auditor.php';
+require_once BLT_OPTIMIZED_DIR . 'includes/class-blt-optimized-page-findings.php';
+require_once BLT_OPTIMIZED_DIR . 'includes/class-blt-optimized-media-auditor.php';
+require_once BLT_OPTIMIZED_DIR . 'includes/class-blt-optimized-psi.php';
+require_once BLT_OPTIMIZED_DIR . 'includes/class-blt-optimized-tweaks.php';
+require_once BLT_OPTIMIZED_DIR . 'includes/class-blt-optimized-fixes.php';
+require_once BLT_OPTIMIZED_DIR . 'includes/class-blt-optimized-site-audit.php';
+require_once BLT_OPTIMIZED_DIR . 'includes/class-blt-optimized-perf-admin.php';
 require_once BLT_OPTIMIZED_DIR . 'includes/class-blt-optimized-admin.php';
 
 /**
@@ -214,6 +236,41 @@ final class BLT_Optimized {
 	public $audit_log;
 
 	/**
+	 * @var BLT_Optimized_Health_Checks
+	 */
+	public $health;
+
+	/**
+	 * @var BLT_Optimized_Page_Auditor
+	 */
+	public $page_auditor;
+
+	/**
+	 * @var BLT_Optimized_Media_Auditor
+	 */
+	public $media_auditor;
+
+	/**
+	 * @var BLT_Optimized_PSI
+	 */
+	public $psi;
+
+	/**
+	 * @var BLT_Optimized_Tweaks
+	 */
+	public $tweaks;
+
+	/**
+	 * @var BLT_Optimized_Fixes
+	 */
+	public $fixes;
+
+	/**
+	 * @var BLT_Optimized_Site_Audit
+	 */
+	public $site_audit;
+
+	/**
 	 * @var BLT_Optimized_Admin
 	 */
 	public $admin;
@@ -238,7 +295,19 @@ final class BLT_Optimized {
 		$this->scanner      = new BLT_Optimized_Scanner( $this->audit_log );
 		$this->cleaner      = new BLT_Optimized_Cleaner( $this->audit_log );
 		$this->db_optimizer = new BLT_Optimized_DB_Optimizer( $this->audit_log );
-		$this->admin        = new BLT_Optimized_Admin( $this );
+
+		// Performance scan: server/DB health checks, front-end page profiling,
+		// media storage audit, optional PageSpeed Insights, and the fixes and
+		// speed tweaks that act on what they find.
+		$this->health        = new BLT_Optimized_Health_Checks( $this->db_optimizer, $this->scanner );
+		$this->page_auditor  = new BLT_Optimized_Page_Auditor();
+		$this->media_auditor = new BLT_Optimized_Media_Auditor( $this->audit_log );
+		$this->psi           = new BLT_Optimized_PSI();
+		$this->tweaks        = new BLT_Optimized_Tweaks();
+		$this->fixes         = new BLT_Optimized_Fixes( $this );
+		$this->site_audit    = new BLT_Optimized_Site_Audit( $this );
+
+		$this->admin = new BLT_Optimized_Admin( $this );
 
 		add_action( 'init', array( $this, 'load_textdomain' ) );
 		add_action( 'blt_optimized_scheduled_scan', array( $this->scanner, 'run_scheduled_scan' ) );
@@ -348,6 +417,9 @@ final class BLT_Optimized {
 			'show_top_menu'      => 1, // Top-level admin menu.
 			'show_tools_menu'    => 0, // Entry under the Tools menu.
 			'enable_images'      => 0, // Optional image-optimization module (off by default).
+			'enable_psi'         => 0, // Google PageSpeed Insights lab data in the performance scan (off by default: sends URLs to Google).
+			'psi_api_key'        => '',
+			'audit_urls'         => '', // Extra URLs for the performance scan, one per line.
 		);
 		$settings = get_option( self::OPTION_SETTINGS, array() );
 		return wp_parse_args( is_array( $settings ) ? $settings : array(), $defaults );

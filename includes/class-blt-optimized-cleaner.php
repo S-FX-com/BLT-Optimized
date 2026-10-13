@@ -20,6 +20,26 @@ class BLT_Optimized_Cleaner {
 	const BATCH_SIZE = 5000;
 
 	/**
+	 * Default age (days) before a finished Action Scheduler action is purged.
+	 * Filterable via `blt_optimized_action_scheduler_retention_days`.
+	 */
+	const ACTION_SCHEDULER_RETENTION_DAYS = 30;
+
+	/**
+	 * Wall-clock cap (seconds) for one Action Scheduler purge pass. A very large
+	 * backlog is cleared over several runs rather than holding one request open.
+	 */
+	const ACTION_SCHEDULER_MAX_SECONDS = 25;
+
+	/**
+	 * Resolved Action Scheduler table names; null when they don't exist, false
+	 * until first looked up.
+	 *
+	 * @var array|null|false
+	 */
+	private $action_scheduler_tables = false;
+
+	/**
 	 * Audit log.
 	 *
 	 * @var BLT_Optimized_Audit_Log
@@ -43,7 +63,7 @@ class BLT_Optimized_Cleaner {
 	public function get_categories() {
 		$settings = BLT_Optimized::get_settings();
 
-		return array(
+		$categories = array(
 			'orphaned_postmeta'       => array(
 				'label'       => __( 'Orphaned post meta', 'blt-optimized' ),
 				'description' => __( 'Meta rows referencing posts that no longer exist.', 'blt-optimized' ),
@@ -106,6 +126,26 @@ class BLT_Optimized_Cleaner {
 				'flag_only'   => true,
 			),
 		);
+
+		// Only offered when WooCommerce / Action Scheduler tables exist. Inserted
+		// before the flag-only leftover-tables entry so that stays last.
+		if ( $this->get_action_scheduler_tables() ) {
+			$leftover = $categories['leftover_tables'];
+			unset( $categories['leftover_tables'] );
+
+			$categories['action_scheduler'] = array(
+				'label'       => __( 'Old Action Scheduler actions and logs', 'blt-optimized' ),
+				'description' => sprintf(
+					/* translators: %d: age in days. */
+					__( 'Completed, failed and canceled Action Scheduler actions older than %d days, plus their log rows and any orphaned log rows. Pending and in-progress actions are never touched.', 'blt-optimized' ),
+					$this->action_scheduler_retention_days()
+				),
+			);
+
+			$categories['leftover_tables'] = $leftover;
+		}
+
+		return $categories;
 	}
 
 	/**
@@ -786,6 +826,181 @@ class BLT_Optimized_Cleaner {
 				$total++;
 			}
 		}
+		return array(
+			'rows'  => $total,
+			'bytes' => $preview['bytes'],
+		);
+	}
+
+	/* ------------------------------------------------------------------ */
+	/* Action Scheduler                                                    */
+	/* ------------------------------------------------------------------ */
+
+	/**
+	 * Retention window for finished Action Scheduler actions, in days.
+	 *
+	 * @return int
+	 */
+	private function action_scheduler_retention_days() {
+		/**
+		 * Filter how many days finished Action Scheduler actions are kept.
+		 *
+		 * @param int $days Retention in days (minimum 1).
+		 */
+		return max( 1, (int) apply_filters( 'blt_optimized_action_scheduler_retention_days', self::ACTION_SCHEDULER_RETENTION_DAYS ) );
+	}
+
+	/**
+	 * Action Scheduler table names, or null when the actions table doesn't
+	 * exist (WooCommerce / Action Scheduler absent). Names are built from the
+	 * site prefix and confirmed against the live table list; the logs table is
+	 * optional ('' when missing).
+	 *
+	 * @return array|null { actions: string, logs: string }
+	 */
+	private function get_action_scheduler_tables() {
+		if ( false !== $this->action_scheduler_tables ) {
+			return $this->action_scheduler_tables;
+		}
+
+		global $wpdb;
+		$this->action_scheduler_tables = null;
+
+		$actions = $wpdb->prefix . 'actionscheduler_actions';
+		$logs    = $wpdb->prefix . 'actionscheduler_logs';
+
+		if ( $wpdb->get_var( $wpdb->prepare( 'SHOW TABLES LIKE %s', $wpdb->esc_like( $actions ) ) ) ) {
+			$has_logs                      = (bool) $wpdb->get_var( $wpdb->prepare( 'SHOW TABLES LIKE %s', $wpdb->esc_like( $logs ) ) );
+			$this->action_scheduler_tables = array(
+				'actions' => $actions,
+				'logs'    => $has_logs ? $logs : '',
+			);
+		}
+
+		return $this->action_scheduler_tables;
+	}
+
+	/**
+	 * WHERE clause (no leading WHERE) matching finished actions old enough to
+	 * purge: complete, failed or canceled, with both the scheduled date and the
+	 * last attempt older than the retention cutoff.
+	 *
+	 * @param string $alias Optional table alias including the dot, e.g. 'a.'.
+	 * @return string Prepared SQL fragment.
+	 */
+	private function action_scheduler_old_where( $alias = '' ) {
+		global $wpdb;
+		$cutoff = gmdate( 'Y-m-d H:i:s', time() - $this->action_scheduler_retention_days() * DAY_IN_SECONDS );
+		return $wpdb->prepare(
+			"{$alias}status IN ('complete','failed','canceled') AND {$alias}scheduled_date_gmt < %s AND ( {$alias}last_attempt_gmt IS NULL OR {$alias}last_attempt_gmt < %s )", // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared
+			$cutoff,
+			$cutoff
+		);
+	}
+
+	/**
+	 * Preview old Action Scheduler actions, their logs, and orphaned logs.
+	 *
+	 * @return array
+	 */
+	private function preview_action_scheduler() {
+		global $wpdb;
+		$tables = $this->get_action_scheduler_tables();
+		if ( ! $tables ) {
+			return array(
+				'count' => 0,
+				'bytes' => 0,
+			);
+		}
+
+		$actions = $wpdb->get_row(
+			"SELECT COUNT(*) AS cnt,
+					COALESCE(SUM(LENGTH(hook) + LENGTH(COALESCE(args,'')) + LENGTH(COALESCE(schedule,'')) + LENGTH(COALESCE(extended_args,'')) + 100),0) AS bytes
+			 FROM {$tables['actions']} WHERE " . $this->action_scheduler_old_where(),
+			ARRAY_A
+		);
+
+		$log_rows  = 0;
+		$log_bytes = 0;
+		$orphans   = 0;
+		if ( '' !== $tables['logs'] ) {
+			$logs      = $wpdb->get_row(
+				"SELECT COUNT(*) AS cnt, COALESCE(SUM(LENGTH(l.message) + 60),0) AS bytes
+				 FROM {$tables['logs']} l INNER JOIN {$tables['actions']} a ON a.action_id = l.action_id
+				 WHERE " . $this->action_scheduler_old_where( 'a.' ),
+				ARRAY_A
+			);
+			$orphaned  = $wpdb->get_row(
+				"SELECT COUNT(*) AS cnt, COALESCE(SUM(LENGTH(l.message) + 60),0) AS bytes
+				 FROM {$tables['logs']} l LEFT JOIN {$tables['actions']} a ON a.action_id = l.action_id
+				 WHERE a.action_id IS NULL",
+				ARRAY_A
+			);
+			$log_rows  = (int) $logs['cnt'] + (int) $orphaned['cnt'];
+			$log_bytes = (int) $logs['bytes'] + (int) $orphaned['bytes'];
+			$orphans   = (int) $orphaned['cnt'];
+		}
+
+		return array(
+			'count' => (int) $actions['cnt'] + $log_rows,
+			'bytes' => (int) $actions['bytes'] + $log_bytes,
+			'notes' => sprintf(
+				/* translators: 1: action count, 2: retention days, 3: log row count, 4: orphaned log row count. */
+				__( '%1$s finished actions older than %2$d days, %3$s log rows (including %4$s orphaned).', 'blt-optimized' ),
+				number_format_i18n( (int) $actions['cnt'] ),
+				$this->action_scheduler_retention_days(),
+				number_format_i18n( $log_rows ),
+				number_format_i18n( $orphans )
+			),
+		);
+	}
+
+	/**
+	 * Delete old finished actions and their logs in batches (logs first, so a
+	 * stopped run never leaves a log row pointing at a missing action), then
+	 * sweep orphaned log rows. Stops after ACTION_SCHEDULER_MAX_SECONDS; run it
+	 * again to continue.
+	 *
+	 * @return array
+	 */
+	private function execute_action_scheduler() {
+		global $wpdb;
+		$tables = $this->get_action_scheduler_tables();
+		if ( ! $tables ) {
+			return array(
+				'rows'  => 0,
+				'bytes' => 0,
+			);
+		}
+
+		$preview  = $this->preview_action_scheduler();
+		$deadline = microtime( true ) + self::ACTION_SCHEDULER_MAX_SECONDS;
+		$total    = 0;
+
+		do {
+			$ids = $wpdb->get_col(
+				"SELECT action_id FROM {$tables['actions']} WHERE " . $this->action_scheduler_old_where() . ' ORDER BY action_id LIMIT ' . (int) self::BATCH_SIZE
+			);
+			if ( empty( $ids ) ) {
+				break;
+			}
+			$id_list = implode( ',', array_map( 'intval', $ids ) );
+			if ( '' !== $tables['logs'] ) {
+				$total += (int) $wpdb->query( "DELETE FROM {$tables['logs']} WHERE action_id IN ({$id_list})" );
+			}
+			$deleted = (int) $wpdb->query( "DELETE FROM {$tables['actions']} WHERE action_id IN ({$id_list})" );
+			$total  += $deleted;
+		} while ( count( $ids ) === self::BATCH_SIZE && $deleted > 0 && microtime( true ) < $deadline );
+
+		// Log rows whose action is already gone (earlier purges, manual deletes).
+		if ( '' !== $tables['logs'] && microtime( true ) < $deadline ) {
+			$total += $this->batched_delete_by_ids(
+				"SELECT l.log_id FROM {$tables['logs']} l LEFT JOIN {$tables['actions']} a ON a.action_id = l.action_id WHERE a.action_id IS NULL",
+				$tables['logs'],
+				'log_id'
+			);
+		}
+
 		return array(
 			'rows'  => $total,
 			'bytes' => $preview['bytes'],

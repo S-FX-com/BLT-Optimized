@@ -22,6 +22,19 @@ delete_option( 'blt_optimized_db_version' );
 delete_option( 'blt_optimized_scan_state' );
 delete_option( 'blt_optimized_last_scan' );
 
+// Performance scan: report, state, page reports, media audit, dismissals,
+// speed tweaks + asset rules, and the autoload-change record. Options whose
+// autoload a fix switched off stay off — that optimization outlives the
+// plugin, like the image module's WebP files.
+delete_option( 'blt_optimized_perf_report' );
+delete_option( 'blt_optimized_perf_state' );
+delete_option( 'blt_optimized_perf_pages' );
+delete_option( 'blt_optimized_dismissed_findings' );
+delete_option( 'blt_optimized_media_audit' );
+delete_option( 'blt_optimized_media_audit_state' );
+delete_option( 'blt_optimized_tweaks' );
+delete_option( 'blt_optimized_autoload_changes' );
+
 // Image module options. NOTE: option key differs by one letter from the base
 // (`blt_optimizer_*` vs `blt_optimized_*`) — this is intentional, not a typo.
 delete_option( 'blt_optimizer_settings' );
@@ -35,7 +48,8 @@ delete_option( 'blt_optimizer_queue_state' );
 // Update-checker state (plugin-update-checker stores per-slug options).
 delete_option( 'external_updates-blt-optimized' );
 
-// Backup acknowledgment transients for any user.
+// Backup acknowledgment transients for any user, plus any unexpired
+// profiler tokens/results (blt_optimized_prof_*, blt_optimized_profres_*).
 $wpdb->query(
 	"DELETE FROM {$wpdb->options}
 	 WHERE option_name LIKE '\\_transient\\_blt\\_optimized\\_%'

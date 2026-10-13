@@ -144,7 +144,11 @@ class BLT_Optimized_Fixes {
 			return $result;
 		}
 
-		if ( isset( $this->plugin->audit_log ) && is_object( $this->plugin->audit_log ) ) {
+		// Cleanup categories and file deletions write their own detailed audit
+		// entry (with the files and bytes); logging them here too would
+		// count the reclaimed space twice.
+		$self_logging = array( 'cleanup', 'delete_orphan_files', 'delete_stale_sizes', 'delete_original_images', 'bricks_delete_css_files' );
+		if ( ! in_array( $action, $self_logging, true ) && isset( $this->plugin->audit_log ) && is_object( $this->plugin->audit_log ) ) {
 			$this->plugin->audit_log->log(
 				'fix_' . $action,
 				$result['message'],

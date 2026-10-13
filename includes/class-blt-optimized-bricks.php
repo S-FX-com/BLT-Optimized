@@ -94,6 +94,13 @@ class BLT_Optimized_Bricks {
 	const SCAN_MAX_ROW_BYTES   = 6 * MB_IN_BYTES;
 	const SCAN_MAX_TOTAL_BYTES = 96 * MB_IN_BYTES;
 
+	/**
+	 * Transient caching located elements (hits and misses) for an hour, and
+	 * the most ids it keeps.
+	 */
+	const LOCATE_CACHE     = 'blt_optimized_bricks_loc';
+	const LOCATE_CACHE_MAX = 500;
+
 	// Query loops.
 	const LOOP_LARGE_LIMIT  = 100;
 	const LOOP_WARN_ITEMS   = 100;
@@ -688,6 +695,41 @@ class BLT_Optimized_Bricks {
 	 *                      element_name, edit_url, label, others (post ids), in_component }
 	 */
 	public static function locate_element( string $element_id ): ?array {
+		$id = self::element_id_from_selector( $element_id );
+		if ( '' === $id ) {
+			$bare = strtolower( trim( $element_id ) );
+			$id   = preg_match( '/^[a-z0-9]{4,20}$/', $bare ) ? $bare : '';
+		}
+		if ( '' === $id || ! self::is_active() ) {
+			return null;
+		}
+
+		// Each lookup is a LIKE scan over all Bricks page meta; keep the
+		// answers (hits and misses) for an hour across requests.
+		$cache = get_transient( self::LOCATE_CACHE );
+		$cache = is_array( $cache ) ? $cache : array();
+		if ( array_key_exists( $id, $cache ) ) {
+			return is_array( $cache[ $id ] ) ? $cache[ $id ] : null;
+		}
+
+		$located = self::locate_element_uncached( $id );
+
+		$cache[ $id ] = $located ? $located : 0;
+		if ( count( $cache ) > self::LOCATE_CACHE_MAX ) {
+			$cache = array_slice( $cache, -self::LOCATE_CACHE_MAX, null, true );
+		}
+		set_transient( self::LOCATE_CACHE, $cache, HOUR_IN_SECONDS );
+
+		return $located;
+	}
+
+	/**
+	 * locate_element() without the cross-request cache.
+	 *
+	 * @param string $element_id Bricks element id or brxe- selector.
+	 * @return array|null
+	 */
+	private static function locate_element_uncached( string $element_id ): ?array {
 		global $wpdb;
 
 		$id = self::element_id_from_selector( $element_id );

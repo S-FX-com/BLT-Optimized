@@ -992,11 +992,19 @@
 			}
 
 			function save( payload ) {
+				var body;
 				phase( 'saving' );
+				try {
+					body = JSON.stringify( payload );
+				} catch ( e ) {
+					// A page script replaced the observer's result with something
+					// that can't be serialised (a cycle, a throwing getter).
+					body = JSON.stringify( { version: 1, warnings: [ 'no_observer' ] } );
+				}
 				api.post( 'perf_lab_store', {
 					url: opts.url,
 					viewport: viewport,
-					payload: JSON.stringify( payload ),
+					payload: body,
 					scan: opts.scan ? 1 : 0
 				} )
 					.done( function ( response ) {
@@ -1036,24 +1044,30 @@
 						payload = payload && 'object' === typeof payload ? payload : null;
 					}
 				}
-				if ( ! payload || 'object' !== typeof payload ) {
+				if ( ! payload || 'object' !== typeof payload || Array.isArray( payload ) ) {
 					payload = { version: 1, warnings: [ 'no_observer' ] };
 				}
 
-				// Unreliable run: repeat once when it can be.
-				if ( payload.nav && ( run.hiddenSeen || ( run.offscreen && ! payload.lcp ) ) && run.retries < 1 ) {
-					run.retries++;
-					teardown();
-					phase( 'retry' );
-					run.timer = window.setTimeout( attempt, 400 );
-					return;
-				}
+				// The payload came from the measured page: a hostile or broken
+				// script there must not be able to stall the run.
+				try {
+					// Unreliable run: repeat once when it can be.
+					if ( payload.nav && ( run.hiddenSeen || ( run.offscreen && ! payload.lcp ) ) && run.retries < 1 ) {
+						run.retries++;
+						teardown();
+						phase( 'retry' );
+						run.timer = window.setTimeout( attempt, 400 );
+						return;
+					}
 
-				if ( 'timeout' === kind ) {
-					addWarning( payload, 'timeout' );
-				}
-				if ( run.hiddenSeen && payload.nav ) {
-					addWarning( payload, 'hidden_tab' );
+					if ( 'timeout' === kind ) {
+						addWarning( payload, 'timeout' );
+					}
+					if ( run.hiddenSeen && payload.nav ) {
+						addWarning( payload, 'hidden_tab' );
+					}
+				} catch ( e ) {
+					payload = { version: 1, warnings: [ 'no_observer' ] };
 				}
 				save( payload );
 			}
@@ -1130,6 +1144,10 @@
 				var $frame = $( '<iframe></iframe>' ).attr( {
 					width: size.w,
 					height: size.h,
+					// Same-origin scripts are needed to measure; the sandbox still
+					// stops a frame-buster navigating the admin tab away, and
+					// blocks popups, dialogs and form submissions from the page.
+					sandbox: 'allow-scripts allow-same-origin',
 					scrolling: 'no',
 					title: tf( 'labFrameTitle', opts.url ),
 					tabindex: -1
@@ -3003,7 +3021,8 @@
 			var latest = null;
 			Object.keys( results ).forEach( function ( viewport ) {
 				var data = results[ viewport ].data || {};
-				cache.lab[ viewport ] = data.lab && data.lab.nav !== undefined ? data.lab : results[ viewport ].payload;
+				// Only the server-sanitized result is rendered, never the raw payload the page produced.
+				cache.lab[ viewport ] = data.lab || { version: 1, warnings: [] };
 				cache.summary[ viewport ] = data.summary || null;
 				latest = data;
 			} );

@@ -120,6 +120,17 @@ class BLT_Optimized_Lab_Mode {
 		add_action( 'send_headers', array( __CLASS__, 'send_headers' ), PHP_INT_MAX );
 		add_action( 'template_redirect', array( __CLASS__, 'consume' ), PHP_INT_MAX );
 		add_action( 'wp_head', array( __CLASS__, 'print_observer' ), -9999 );
+
+		// The measured page renders for a logged-out visitor, but its
+		// response lands in the admin's own browser: don't let it set or
+		// clear cookies there (a shop clearing its cart cookies, say).
+		// Runs just before headers go out, so late setcookie() calls are
+		// caught too.
+		header_register_callback(
+			static function () {
+				header_remove( 'Set-Cookie' );
+			}
+		);
 	}
 
 	/**
@@ -162,11 +173,44 @@ class BLT_Optimized_Lab_Mode {
 		if ( ! is_string( $location ) || '' === $location ) {
 			return $location;
 		}
-		$host = BLT_Optimized_Components::url_host( $location );
-		if ( '' !== $host && ! BLT_Optimized_Components::is_local_host( $host ) ) {
+		$parts = wp_parse_url( $location );
+		if ( ! is_array( $parts ) ) {
+			return $location;
+		}
+		if ( isset( $parts['host'] ) ) {
+			if ( ! self::is_home_origin( $location ) ) {
+				return $location;
+			}
+		} elseif ( isset( $parts['scheme'] ) || '/' !== substr( $location, 0, 1 ) || '//' === substr( $location, 0, 2 ) ) {
+			// No host: only a root-relative path ("/x") is unambiguous.
 			return $location;
 		}
 		return add_query_arg( self::QUERY_ARG, self::$token, $location );
+	}
+
+	/**
+	 * Whether a URL has the exact scheme, host and port of home_url() or
+	 * site_url().
+	 *
+	 * @param string $url URL.
+	 * @return bool
+	 */
+	public static function is_home_origin( $url ) {
+		$target = wp_parse_url( (string) $url );
+		if ( ! is_array( $target ) || empty( $target['host'] ) ) {
+			return false;
+		}
+		foreach ( array( home_url(), site_url() ) as $base ) {
+			$home = wp_parse_url( $base );
+			if ( is_array( $home )
+				&& strtolower( isset( $home['scheme'] ) ? $home['scheme'] : '' ) === strtolower( isset( $target['scheme'] ) ? $target['scheme'] : '' )
+				&& strtolower( isset( $home['host'] ) ? $home['host'] : '' ) === strtolower( $target['host'] )
+				&& ( isset( $home['port'] ) ? (int) $home['port'] : 0 ) === ( isset( $target['port'] ) ? (int) $target['port'] : 0 )
+			) {
+				return true;
+			}
+		}
+		return false;
 	}
 
 	/**
@@ -177,10 +221,10 @@ class BLT_Optimized_Lab_Mode {
 	 * @return void
 	 */
 	public static function send_headers() {
-		nocache_headers();
 		if ( headers_sent() ) {
 			return;
 		}
+		nocache_headers();
 
 		header( 'X-BLT-Lab: 1' );
 
@@ -194,7 +238,7 @@ class BLT_Optimized_Lab_Mode {
 			$value = trim( $parts[1] );
 
 			if ( 'x-frame-options' === $name && 0 !== strcasecmp( $value, 'SAMEORIGIN' ) ) {
-				header_remove( 'X-Frame-Options' );
+				header( 'X-Frame-Options: SAMEORIGIN' ); // Replaces DENY: framable by this site only.
 			}
 			if ( 'content-security-policy' === $name ) {
 				$csp[] = $value;

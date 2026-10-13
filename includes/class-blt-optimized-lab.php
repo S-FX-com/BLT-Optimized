@@ -51,6 +51,7 @@ class BLT_Optimized_Lab {
 	 */
 	const PAYLOAD_VERSION    = 1;
 	const MAX_PAYLOAD_BYTES  = 1572864; // 1.5 MB.
+	const STORE_MAX_BYTES    = 262144; // 256 KB per stored result.
 	const MAX_JSON_DEPTH     = 16;
 	const MAX_TIME_MS        = 120000;
 	const MAX_CLS            = 50;
@@ -66,6 +67,12 @@ class BLT_Optimized_Lab {
 	const MAX_LONG_TASKS     = 15;
 	const MAX_WARNINGS       = 12;
 	const MAX_BRICKS_LOOKUPS = 30;
+
+	/**
+	 * Seconds of Bricks element lookups allowed per payload: each miss is a
+	 * LIKE scan over all Bricks page meta, which is slow on large sites.
+	 */
+	const BRICKS_LOOKUP_BUDGET = 3.0;
 
 	/*
 	 * Thresholds. All are filterable as a set through
@@ -145,7 +152,7 @@ class BLT_Optimized_Lab {
 	/**
 	 * Warning codes a payload may carry (anything else is dropped).
 	 */
-	const WARNINGS = array( 'hidden_tab', 'framed_blocked', 'no_observer', 'timeout', 'no_lcp', 'no_loaf', 'no_longtask', 'css_truncated' );
+	const WARNINGS = array( 'hidden_tab', 'framed_blocked', 'no_observer', 'timeout', 'no_lcp', 'no_loaf', 'no_longtask', 'css_truncated', 'trimmed' );
 
 	/**
 	 * Resolved (filtered) thresholds for the current process.
@@ -186,12 +193,65 @@ class BLT_Optimized_Lab {
 
 		try {
 			$result = self::sanitize_payload( $raw, $url, $viewport );
+			if ( is_array( $result ) ) {
+				$result = self::fit_storage( $result );
+			}
 		} catch ( \Throwable $e ) {
 			$result = new WP_Error( 'blt_lab_invalid', __( 'The lab measurement could not be processed.', 'blt-optimized' ) );
 		}
 
 		self::reset_memo();
 		return $result;
+	}
+
+	/**
+	 * Keep a stored result within STORE_MAX_BYTES. Real pages come in around
+	 * 25 KB; only a pathological (or hostile) page reaches the caps, and a
+	 * dozen such results would otherwise make the page-report option huge.
+	 * Trims the longest lists, keeping their most significant entries.
+	 *
+	 * @param array $lab Sanitized result.
+	 * @return array
+	 */
+	private static function fit_storage( array $lab ) {
+		$steps = array(
+			array( 'resources', 150 ),
+			array( 'images', 60 ),
+			array( 'css', 50 ),
+			array( 'loaf', 10 ),
+			array( 'resources', 60 ),
+			array( 'images', 25 ),
+			array( 'css', 20 ),
+		);
+		foreach ( $steps as $step ) {
+			if ( strlen( serialize( $lab ) ) <= self::STORE_MAX_BYTES ) { // phpcs:ignore WordPress.PHP.DiscouragedPHPFunctions.serialize_serialize -- measuring the stored size.
+				break;
+			}
+			list( $key, $keep ) = $step;
+			if ( empty( $lab[ $key ] ) || ! is_array( $lab[ $key ] ) || count( $lab[ $key ] ) <= $keep ) {
+				continue;
+			}
+			// Biggest first, so what remains is what matters most.
+			usort(
+				$lab[ $key ],
+				static function ( $a, $b ) {
+					$weight = static function ( $item ) {
+						foreach ( array( 'encoded', 'unusedBytes', 'bytes', 'duration' ) as $field ) {
+							if ( is_array( $item ) && isset( $item[ $field ] ) && is_numeric( $item[ $field ] ) ) {
+								return (float) $item[ $field ];
+							}
+						}
+						return 0.0;
+					};
+					return $weight( $b ) <=> $weight( $a );
+				}
+			);
+			$lab[ $key ]       = array_slice( $lab[ $key ], 0, $keep );
+			$lab['warnings']   = isset( $lab['warnings'] ) && is_array( $lab['warnings'] ) ? $lab['warnings'] : array();
+			$lab['warnings'][] = 'trimmed';
+			$lab['warnings']   = array_values( array_unique( $lab['warnings'] ) );
+		}
+		return $lab;
 	}
 
 	/**
@@ -365,6 +425,7 @@ class BLT_Optimized_Lab {
 			'components' => array(),
 			'bricks'     => array(),
 			'lookups'    => 0,
+			'lookup_s'   => 0.0,
 			'slugs'      => null,
 		);
 	}
@@ -825,7 +886,7 @@ class BLT_Optimized_Lab {
 				'fetchpriority'     => self::to_token( self::g( $image, 'fetchpriority' ), 12 ),
 				'decoding'          => self::to_token( self::g( $image, 'decoding' ), 12 ),
 				'hasSrcset'         => self::to_flag( self::g( $image, 'hasSrcset' ) ),
-				'sizes'             => self::to_str( self::g( $image, 'sizes' ), 200 ),
+				'sizes'             => self::to_str( self::g( $image, 'sizes' ), 200, true ),
 				'alt'               => self::to_flag( self::g( $image, 'alt' ) ),
 				'complete'          => self::to_flag( self::g( $image, 'complete' ) ),
 				'component'         => self::component_for( $src ),
@@ -1119,7 +1180,9 @@ class BLT_Optimized_Lab {
 		}
 
 		$url = substr( trim( $value ), 0, 2000 );
-		if ( ! preg_match( '#^https?://[^/?\#\s<>"\\\\]+(?:[/?\#][^\s<>"\\\\]*)?$#i', $url ) ) {
+		if ( preg_match( '/[\x00-\x1F\x7F]|\xE2\x80[\x8B-\x8F\xAA-\xAE]|\xE2\x81[\xA6-\xA9]/', $url ) ) {
+			$url = ''; // Control or bidi-override characters: never a real asset URL.
+		} elseif ( ! preg_match( '#^https?://[^/?\#\s<>"\\\\]+(?:[/?\#][^\s<>"\\\\]*)?$#i', $url ) ) {
 			$url = '';
 		} else {
 			$url = self::strip_bust( $url );
@@ -1312,16 +1375,18 @@ class BLT_Optimized_Lab {
 		if ( array_key_exists( $element_id, self::$memo['bricks'] ) ) {
 			return self::$memo['bricks'][ $element_id ];
 		}
-		if ( self::$memo['lookups'] >= self::MAX_BRICKS_LOOKUPS ) {
+		if ( self::$memo['lookups'] >= self::MAX_BRICKS_LOOKUPS || self::$memo['lookup_s'] >= self::BRICKS_LOOKUP_BUDGET ) {
 			return null;
 		}
 		++self::$memo['lookups'];
 
+		$started = microtime( true );
 		try {
 			$located = BLT_Optimized_Bricks::locate_element( $element_id );
 		} catch ( \Throwable $e ) {
 			$located = null;
 		}
+		self::$memo['lookup_s'] += microtime( true ) - $started;
 		$located                             = self::clean_bricks( $located, 0 );
 		self::$memo['bricks'][ $element_id ] = $located ? $located : null;
 		return self::$memo['bricks'][ $element_id ];

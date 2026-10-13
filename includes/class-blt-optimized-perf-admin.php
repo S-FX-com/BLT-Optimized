@@ -534,6 +534,7 @@ class BLT_Optimized_Perf_Admin {
 						'labWarn_no_loaf'          => __( 'This browser does not report long animation frames (Chrome and Edge 123 or later do), so main-thread time per script is unavailable.', 'blt-optimized' ),
 						'labWarn_no_longtask'      => __( 'This browser does not report long tasks, so Total Blocking Time could not be measured.', 'blt-optimized' ),
 						'labWarn_css_truncated'    => __( 'This page has so much CSS that the unused-CSS check stopped after 0.8 seconds; the figures cover only part of it.', 'blt-optimized' ),
+						'labWarn_trimmed'          => __( 'This page loads an unusually large number of files, images or stylesheets, so only the largest are kept in the stored result.', 'blt-optimized' ),
 						'labEmptyTitle'            => __( 'No lab test for this page yet', 'blt-optimized' ),
 						'labEmptyHint'             => __( 'Pick Mobile, Desktop or Both next to “Run lab test” above to measure Core Web Vitals in your own browser.', 'blt-optimized' ),
 						'labOnlyTitle'             => __( 'Lab test only', 'blt-optimized' ),
@@ -1053,8 +1054,7 @@ class BLT_Optimized_Perf_Admin {
 	 */
 	private function lab_url_arg() {
 		$url  = isset( $_POST['url'] ) ? esc_url_raw( wp_unslash( $_POST['url'] ), array( 'http', 'https' ) ) : ''; // phpcs:ignore WordPress.Security.NonceVerification.Missing -- verify_ajax() by every caller.
-		$host = BLT_Optimized_Components::url_host( $url );
-		if ( '' === $url || '' === $host || ! BLT_Optimized_Components::is_local_host( $host ) ) {
+		if ( '' === $url || ! BLT_Optimized_Lab_Mode::is_home_origin( $url ) ) {
 			wp_send_json_error( array( 'message' => __( 'Enter a URL on this site.', 'blt-optimized' ) ) );
 		}
 		return remove_query_arg( array( BLT_Optimized_Lab_Mode::QUERY_ARG, BLT_Optimized_Profiler::QUERY_ARG ), $url );

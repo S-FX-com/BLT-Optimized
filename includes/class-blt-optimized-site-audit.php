@@ -31,6 +31,12 @@ class BLT_Optimized_Site_Audit {
 	const STATE_OPTION = 'blt_optimized_perf_state';
 
 	/**
+	 * Lab results posted by the browser during a scan, kept apart from the
+	 * (much larger) scan state so each result is a small write. Never autoloaded.
+	 */
+	const LAB_OPTION = 'blt_optimized_perf_lab';
+
+	/**
 	 * Page reports from the last scan, kept for the Page Profiler. Never autoloaded.
 	 */
 	const PAGES_OPTION = 'blt_optimized_perf_pages';
@@ -85,7 +91,6 @@ class BLT_Optimized_Site_Audit {
 			'media'       => array(),
 			'pages'       => array(),
 			'psi'         => array(),
-			'lab_done'    => array(),
 			'errors'      => array(),
 			'started_at'  => 0,
 			'finished_at' => 0,
@@ -144,13 +149,13 @@ class BLT_Optimized_Site_Audit {
 			'media'       => array(),
 			'pages'       => array(),
 			'psi'         => array(),
-			'lab_done'    => array(),
 			'errors'      => array(),
 			'started_at'  => time(),
 			'finished_at' => 0,
 			'label'       => __( 'Checking server and database…', 'blt-optimized' ),
 		);
 		$this->save_state( $state );
+		delete_option( self::LAB_OPTION );
 
 		return $state;
 	}
@@ -168,6 +173,7 @@ class BLT_Optimized_Site_Audit {
 			$state['finished_at'] = time();
 			$state['label']       = __( 'Scan cancelled.', 'blt-optimized' );
 			$this->save_state( $state );
+			delete_option( self::LAB_OPTION );
 		}
 		return $state;
 	}
@@ -396,7 +402,7 @@ class BLT_Optimized_Site_Audit {
 	 * @return array
 	 */
 	private function step_compile( array $state ) {
-		$pages = (array) $state['pages'];
+		$pages = $this->with_lab_results( (array) $state['pages'], $state['run_id'] );
 
 		$findings = array_merge(
 			(array) $state['health'],
@@ -458,8 +464,8 @@ class BLT_Optimized_Site_Audit {
 		$state['media']       = array();
 		$state['pages']       = array();
 		$state['psi']         = array();
-		$state['lab_done']    = array();
 		++$state['step'];
+		delete_option( self::LAB_OPTION );
 
 		return $state;
 	}
@@ -529,7 +535,7 @@ class BLT_Optimized_Site_Audit {
 	 */
 	public function lab_queue( $state = null ) {
 		$state = is_array( $state ) ? $state : $this->get_state();
-		$done  = array_flip( (array) $state['lab_done'] );
+		$done  = $this->lab_results( $state['run_id'] );
 		$queue = array();
 		foreach ( (array) $state['pages'] as $page ) {
 			$status = isset( $page['http']['status'] ) ? (int) $page['http']['status'] : 0;
@@ -557,16 +563,55 @@ class BLT_Optimized_Site_Audit {
 		if ( 'running' !== $state['status'] ) {
 			return null;
 		}
-		foreach ( $state['pages'] as $i => $page ) {
+		foreach ( $state['pages'] as $page ) {
 			if ( self::same_url( $page['url'], $url ) ) {
-				$state['pages'][ $i ]['lab'][ $viewport ] = $lab;
-				$state['lab_done'][]                      = $page['url'];
-				$state['lab_done']                        = array_values( array_unique( $state['lab_done'] ) );
-				$this->save_state( $state );
-				return $state['pages'][ $i ];
+				$results = $this->lab_results( $state['run_id'] );
+
+				$results[ $page['url'] ][ $viewport ] = $lab;
+				update_option(
+					self::LAB_OPTION,
+					array(
+						'run_id'  => $state['run_id'],
+						'results' => $results,
+					),
+					false
+				);
+				$page['lab'] = $results[ $page['url'] ];
+				return $page;
 			}
 		}
 		return null;
+	}
+
+	/**
+	 * Lab results posted for a scan run: url => { viewport => lab }.
+	 *
+	 * @param string $run_id Scan run id.
+	 * @return array
+	 */
+	private function lab_results( $run_id ) {
+		$stored = get_option( self::LAB_OPTION, array() );
+		if ( ! is_array( $stored ) || ! isset( $stored['run_id'], $stored['results'] ) || $stored['run_id'] !== $run_id ) {
+			return array();
+		}
+		return (array) $stored['results'];
+	}
+
+	/**
+	 * Merge a run's lab results into its page reports.
+	 *
+	 * @param array[] $pages  Page reports.
+	 * @param string  $run_id Scan run id.
+	 * @return array[]
+	 */
+	private function with_lab_results( array $pages, $run_id ) {
+		$results = $this->lab_results( $run_id );
+		foreach ( $pages as $i => $page ) {
+			if ( isset( $page['url'], $results[ $page['url'] ] ) ) {
+				$pages[ $i ]['lab'] = $results[ $page['url'] ];
+			}
+		}
+		return $pages;
 	}
 
 	/**

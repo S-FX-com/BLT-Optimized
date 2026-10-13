@@ -29,6 +29,7 @@ delete_option( 'blt_optimized_last_scan' );
 delete_option( 'blt_optimized_perf_report' );
 delete_option( 'blt_optimized_perf_state' );
 delete_option( 'blt_optimized_perf_pages' );
+delete_option( 'blt_optimized_perf_lab' );
 delete_option( 'blt_optimized_dismissed_findings' );
 delete_option( 'blt_optimized_media_audit' );
 delete_option( 'blt_optimized_media_audit_state' );

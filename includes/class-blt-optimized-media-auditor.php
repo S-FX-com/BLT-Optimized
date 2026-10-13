@@ -73,6 +73,7 @@ class BLT_Optimized_Media_Auditor {
 	const ATTACHMENT_CHUNK        = 150;
 	const LARGEST_LIMIT           = 20;
 	const FIX_MAX_ITEMS           = 2000;
+	const FIX_TIME_BUDGET         = 25;
 	const FINDING_MAX_ARGS        = 500;
 	const MIN_FILE_AGE            = 300;
 	const DUP_MIN_BYTES           = 51200;
@@ -1251,7 +1252,7 @@ class BLT_Optimized_Media_Auditor {
 			$wpdb->prepare(
 				"SELECT post_id, meta_key, meta_value FROM {$wpdb->postmeta}
 				 WHERE post_id IN (" . implode( ',', array_fill( 0, count( $ids ), '%d' ) ) . ")
-				 AND meta_key IN ( '_wp_attached_file', '_wp_attachment_metadata', '_wp_attachment_backup_sizes' )",
+				 AND meta_key IN ( '_wp_attached_file', '_wp_attachment_metadata', '_wp_attachment_backup_sizes', '_blt_webp_sizes' )",
 				$ids
 			),
 			ARRAY_A
@@ -1279,11 +1280,13 @@ class BLT_Optimized_Media_Auditor {
 				$this->collect_names( $meta, $file_names );
 				$names = array_merge( $names, $file_names );
 			}
-			$backup = isset( $by[ $id ]['_wp_attachment_backup_sizes'] ) ? $this->safe_unserialize( $by[ $id ]['_wp_attachment_backup_sizes'] ) : null;
-			if ( is_array( $backup ) ) {
-				$file_names = array();
-				$this->collect_names( $backup, $file_names );
-				$names = array_merge( $names, $file_names );
+			foreach ( array( '_wp_attachment_backup_sizes', '_blt_webp_sizes' ) as $extra_key ) {
+				$extra = isset( $by[ $id ][ $extra_key ] ) ? $this->safe_unserialize( $by[ $id ][ $extra_key ] ) : null;
+				if ( is_array( $extra ) ) {
+					$file_names = array();
+					$this->collect_names( $extra, $file_names );
+					$names = array_merge( $names, $file_names );
+				}
 			}
 
 			// File footprint: main + sizes + original + editor backups, in the attachment's folder.
@@ -2062,7 +2065,7 @@ class BLT_Optimized_Media_Auditor {
 	 * results when they are no longer orphans).
 	 *
 	 * @param string[] $paths Paths relative to the uploads basedir (as in the results).
-	 * @return array|WP_Error { files: int, bytes: int, skipped: int }
+	 * @return array|WP_Error { files: int, bytes: int, skipped: int, remaining: int }
 	 */
 	public function delete_orphans( array $paths ) {
 		$results = $this->get_results();
@@ -2143,31 +2146,42 @@ class BLT_Optimized_Media_Auditor {
 			$verify[ $path ] = array( $abs, $name, (int) $stat['size'] );
 		}
 
-		// One batched reference check for everything that survived.
-		$names = array();
-		foreach ( $verify as $info ) {
-			$names[] = $info[1];
-		}
-		$referenced = ! empty( $names ) ? $this->find_referenced( $names, false ) : array();
+		// Reference-check what survived in small batches, then delete. Stops at the time
+		// budget (the rest stays in the results for another request).
+		$deadline  = microtime( true ) + self::FIX_TIME_BUDGET;
+		$remaining = 0;
+		$files     = 0;
+		$bytes     = 0;
+		$deleted   = array();
+		foreach ( array_chunk( $verify, self::REF_CHUNK, true ) as $chunk ) {
+			if ( microtime( true ) > $deadline ) {
+				$remaining += count( $chunk );
+				continue;
+			}
 
-		$files   = 0;
-		$bytes   = 0;
-		$deleted = array();
-		foreach ( $verify as $path => $info ) {
-			if ( isset( $referenced[ $info[1] ] ) ) {
-				$handled[ $path ] = true; // Referenced → keep the file, drop from the list.
-				continue;
+			$names = array();
+			foreach ( $chunk as $info ) {
+				$names[] = $info[1];
 			}
-			wp_delete_file( $info[0] );
-			clearstatcache( true, $info[0] );
-			if ( file_exists( $info[0] ) ) {
-				++$skipped;
-				continue;
+			$referenced = $this->find_referenced( $names, false );
+
+			foreach ( $chunk as $path => $info ) {
+				$path = (string) $path;
+				if ( isset( $referenced[ $info[1] ] ) ) {
+					$handled[ $path ] = true; // Referenced → keep the file, drop from the list.
+					continue;
+				}
+				wp_delete_file( $info[0] );
+				clearstatcache( true, $info[0] );
+				if ( file_exists( $info[0] ) ) {
+					++$skipped;
+					continue;
+				}
+				++$files;
+				$bytes           += $info[2];
+				$handled[ $path ] = true;
+				$deleted[]        = $path;
 			}
-			++$files;
-			$bytes           += $info[2];
-			$handled[ $path ] = true;
-			$deleted[]        = $path;
 		}
 
 		$this->drop_results_items(
@@ -2192,9 +2206,10 @@ class BLT_Optimized_Media_Auditor {
 		}
 
 		return array(
-			'files'   => $files,
-			'bytes'   => $bytes,
-			'skipped' => $skipped,
+			'files'     => $files,
+			'bytes'     => $bytes,
+			'skipped'   => $skipped,
+			'remaining' => $remaining,
 		);
 	}
 
@@ -2203,7 +2218,7 @@ class BLT_Optimized_Media_Auditor {
 	 * their entries from the attachment metadata.
 	 *
 	 * @param array $items Each array( 'attachment_id' => int, 'size' => string ); must all be in the stored results.
-	 * @return array|WP_Error { files: int, bytes: int, skipped: int }
+	 * @return array|WP_Error { files: int, bytes: int, skipped: int, remaining: int }
 	 */
 	public function delete_stale_sizes( array $items ) {
 		$results = $this->get_results();
@@ -2244,14 +2259,20 @@ class BLT_Optimized_Media_Auditor {
 			return new WP_Error( 'blt_media_sizes_unavailable', __( 'The registered image sizes could not be determined, so no thumbnails were deleted.', 'blt-optimized' ) );
 		}
 
-		$handled = array(); // "id|size" keys to drop from the results.
-		$skipped = 0;
-		$files   = 0;
-		$bytes   = 0;
-		$deleted = array();
-		$sizes_l = array();
+		$handled   = array(); // "id|size" keys to drop from the results.
+		$skipped   = 0;
+		$remaining = 0;
+		$files     = 0;
+		$bytes     = 0;
+		$deleted   = array();
+		$sizes_l   = array();
+		$deadline  = microtime( true ) + self::FIX_TIME_BUDGET;
 
 		foreach ( $by_attachment as $id => $requested ) {
+			if ( microtime( true ) > $deadline ) {
+				$remaining += count( $requested );
+				continue;
+			}
 			$rel = get_post_meta( $id, '_wp_attached_file', true );
 			if ( ! is_string( $rel ) || ! preg_match( '#^(\d{4}/(?:0[1-9]|1[0-2]))/([^/]+)$#', $rel, $m ) ) {
 				$skipped += count( $requested );
@@ -2342,6 +2363,19 @@ class BLT_Optimized_Media_Auditor {
 			foreach ( $approved as $size => $info ) {
 				unset( $new_meta['sizes'][ $size ] );
 			}
+			// Other unregistered size names that point at the very same file would dangle once it is gone.
+			foreach ( $meta['sizes'] as $other_name => $other ) {
+				if ( isset( $approved[ $other_name ] ) || isset( $registered[ (string) $other_name ] ) || ! is_array( $other ) || ! isset( $other['file'] ) || ! is_string( $other['file'] ) ) {
+					continue;
+				}
+				foreach ( $approved as $info ) {
+					if ( 0 === strcasecmp( $other['file'], $info[0] ) ) {
+						unset( $new_meta['sizes'][ $other_name ] );
+						$handled[ $id . '|' . $other_name ] = true;
+						break;
+					}
+				}
+			}
 			if ( empty( $new_meta['sizes'] ) ) {
 				$new_meta['sizes'] = array();
 			}
@@ -2351,15 +2385,15 @@ class BLT_Optimized_Media_Auditor {
 			}
 
 			// Delete each file once, and only if nothing left in the metadata still uses it.
-			$remaining = array();
-			$this->collect_names( $new_meta, $remaining );
-			$remaining_l = array_flip( array_map( 'strtolower', $remaining ) );
+			$meta_names = array();
+			$this->collect_names( $new_meta, $meta_names );
+			$still_used = array_flip( array_map( 'strtolower', $meta_names ) );
 			$done_files  = array();
 			foreach ( $approved as $size => $info ) {
 				$sizes_l[ $size ]             = true;
 				$handled[ $id . '|' . $size ] = true;
 				$lower                        = strtolower( $info[0] );
-				if ( isset( $done_files[ $lower ] ) || isset( $remaining_l[ $lower ] ) ) {
+				if ( isset( $done_files[ $lower ] ) || isset( $still_used[ $lower ] ) ) {
 					continue;
 				}
 				$done_files[ $lower ] = true;
@@ -2398,9 +2432,10 @@ class BLT_Optimized_Media_Auditor {
 		}
 
 		return array(
-			'files'   => $files,
-			'bytes'   => $bytes,
-			'skipped' => $skipped,
+			'files'     => $files,
+			'bytes'     => $bytes,
+			'skipped'   => $skipped,
+			'remaining' => $remaining,
 		);
 	}
 
@@ -2410,7 +2445,7 @@ class BLT_Optimized_Media_Auditor {
 	 * (main) file still exists.
 	 *
 	 * @param int[] $attachment_ids Attachment IDs present in the stored results.
-	 * @return array|WP_Error { files: int, bytes: int, skipped: int }
+	 * @return array|WP_Error { files: int, bytes: int, skipped: int, remaining: int }
 	 */
 	public function delete_originals( array $attachment_ids ) {
 		$results = $this->get_results();
@@ -2441,13 +2476,19 @@ class BLT_Optimized_Media_Auditor {
 			return new WP_Error( 'blt_media_too_many', __( 'Too many items in one request. Delete them in smaller batches.', 'blt-optimized' ) );
 		}
 
-		$handled = array();
-		$skipped = 0;
-		$files   = 0;
-		$bytes   = 0;
-		$deleted = array();
+		$handled   = array();
+		$skipped   = 0;
+		$remaining = 0;
+		$files     = 0;
+		$bytes     = 0;
+		$deleted   = array();
+		$deadline  = microtime( true ) + self::FIX_TIME_BUDGET;
 
 		foreach ( $ids as $id ) {
+			if ( microtime( true ) > $deadline ) {
+				++$remaining;
+				continue;
+			}
 			$item = $stored[ $id ];
 			$rel  = get_post_meta( $id, '_wp_attached_file', true );
 			if ( ! is_string( $rel ) || ! preg_match( '#^(\d{4}/(?:0[1-9]|1[0-2]))/([^/]+)$#', $rel, $m ) ) {
@@ -2542,9 +2583,10 @@ class BLT_Optimized_Media_Auditor {
 		}
 
 		return array(
-			'files'   => $files,
-			'bytes'   => $bytes,
-			'skipped' => $skipped,
+			'files'     => $files,
+			'bytes'     => $bytes,
+			'skipped'   => $skipped,
+			'remaining' => $remaining,
 		);
 	}
 

@@ -479,6 +479,17 @@ class BLT_Optimized_Tweaks {
 	}
 
 	/**
+	 * Validate an asset rule without saving it.
+	 *
+	 * @param array $rule Rule (see build_rule()).
+	 * @return true|WP_Error
+	 */
+	public static function check_rule( array $rule ) {
+		$built = self::build_rule( $rule );
+		return is_wp_error( $built ) ? $built : true;
+	}
+
+	/**
 	 * Add an asset rule. A rule for the same type + handle replaces the
 	 * existing one (keeping its id).
 	 *

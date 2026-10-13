@@ -127,7 +127,7 @@ class BLT_Optimized_Perf_Admin {
 					'confirmDelete'   => __( 'This permanently deletes data. Continue?', 'blt-optimized' ),
 					'applied'         => __( 'Applied — run the scan again to confirm the improvement.', 'blt-optimized' ),
 					'dismissed'       => __( 'Dismissed', 'blt-optimized' ),
-					'noReport'        => __( 'No performance scan yet. Click “Run full scan” to analyse this site.', 'blt-optimized' ),
+					'noReport'        => __( 'Click “Run full scan” to analyse this site. A scan usually takes a minute or two.', 'blt-optimized' ),
 					'profiling'       => __( 'Loading the page and collecting measurements…', 'blt-optimized' ),
 					'psiRunning'      => __( 'Asking Google PageSpeed Insights (this can take up to a minute)…', 'blt-optimized' ),
 					'error'           => __( 'Request failed. Please try again.', 'blt-optimized' ),
@@ -212,6 +212,7 @@ class BLT_Optimized_Perf_Admin {
 						'step_psi'                 => __( 'PageSpeed', 'blt-optimized' ),
 						'step_compile'             => __( 'Report', 'blt-optimized' ),
 						'noReportTitle'            => __( 'No performance scan yet', 'blt-optimized' ),
+						'runScan'                  => __( 'Run full scan', 'blt-optimized' ),
 						/* translators: %s: human time difference, e.g. "5 minutes ago". */
 						'lastScan'                 => __( 'Last scan %s', 'blt-optimized' ),
 						/* translators: %d: seconds. */
@@ -294,6 +295,8 @@ class BLT_Optimized_Perf_Admin {
 						'colEnabled'               => __( 'Enabled', 'blt-optimized' ),
 						'colOption'                => __( 'Option', 'blt-optimized' ),
 						'colChanged'               => __( 'Changed', 'blt-optimized' ),
+						'colActions'               => __( 'Actions', 'blt-optimized' ),
+						'colFlags'                 => __( 'Flags', 'blt-optimized' ),
 						/* translators: %s: number of database queries. */
 						'queryOne'                 => __( '%s query', 'blt-optimized' ),
 						/* translators: %s: number of database queries. */
@@ -613,8 +616,7 @@ class BLT_Optimized_Perf_Admin {
 	/**
 	 * Apply a fix from a finding.
 	 *
-	 * POST: fix_action (string), args (JSON object), backup_ack (bool),
-	 * finding_key (optional; recorded as dismissed-as-fixed on success).
+	 * POST: fix_action (string), args (JSON object), backup_ack (bool).
 	 *
 	 * @return void
 	 */
@@ -808,7 +810,7 @@ class BLT_Optimized_Perf_Admin {
 	 */
 	public function ajax_rule_toggle() {
 		$this->admin->verify_ajax();
-		$id      = isset( $_POST['id'] ) ? sanitize_key( wp_unslash( $_POST['id'] ) ) : ''; // phpcs:ignore WordPress.Security.NonceVerification.Missing -- verify_ajax().
+		$id      = $this->rule_id_arg(); // phpcs:ignore WordPress.Security.NonceVerification.Missing -- verify_ajax().
 		$enabled = ! empty( $_POST['enabled'] ); // phpcs:ignore WordPress.Security.NonceVerification.Missing -- verify_ajax().
 		if ( ! BLT_Optimized_Tweaks::set_rule_enabled( $id, $enabled ) ) {
 			wp_send_json_error( array( 'message' => __( 'Rule not found.', 'blt-optimized' ) ) );
@@ -824,7 +826,7 @@ class BLT_Optimized_Perf_Admin {
 	 */
 	public function ajax_rule_delete() {
 		$this->admin->verify_ajax();
-		$id = isset( $_POST['id'] ) ? sanitize_key( wp_unslash( $_POST['id'] ) ) : ''; // phpcs:ignore WordPress.Security.NonceVerification.Missing -- verify_ajax().
+		$id = $this->rule_id_arg(); // phpcs:ignore WordPress.Security.NonceVerification.Missing -- verify_ajax().
 		if ( ! BLT_Optimized_Tweaks::remove_rule( $id ) ) {
 			wp_send_json_error( array( 'message' => __( 'Rule not found.', 'blt-optimized' ) ) );
 		}
@@ -862,6 +864,17 @@ class BLT_Optimized_Perf_Admin {
 			'rules'           => array_values( BLT_Optimized_Tweaks::rules() ),
 			'autoloadChanges' => $changes,
 		);
+	}
+
+	/**
+	 * The posted asset-rule id. Ids are mixed-case (`r_1usLtbi1`), so this
+	 * strips rather than lowercases like sanitize_key() would.
+	 *
+	 * @return string
+	 */
+	private function rule_id_arg() {
+		$id = isset( $_POST['id'] ) ? wp_unslash( $_POST['id'] ) : ''; // phpcs:ignore WordPress.Security.NonceVerification.Missing, WordPress.Security.ValidatedSanitizedInput.InputNotSanitized -- verified by caller; stripped to [A-Za-z0-9_] below.
+		return is_string( $id ) ? preg_replace( '/[^A-Za-z0-9_]/', '', $id ) : '';
 	}
 
 	/**

@@ -75,6 +75,10 @@
 		return tf( 1 === Number( count ) ? oneKey : manyKey, num( count ) );
 	}
 
+	function trim( value ) {
+		return String( null === value || undefined === value ? '' : value ).replace( /^\s+|\s+$/g, '' );
+	}
+
 	function isNumber( value ) {
 		return null !== value && undefined !== value && '' !== value && isFinite( Number( value ) );
 	}
@@ -126,7 +130,7 @@
 
 	// http(s) URLs, root-relative paths and wp-admin pages only.
 	function safeUrl( url ) {
-		url = String( null === url || undefined === url ? '' : url ).replace( /^\s+|\s+$/g, '' );
+		url = trim( url );
 		if ( /[\u0000-\u001f]/.test( url ) ) {
 			return '';
 		}
@@ -245,12 +249,14 @@
 			return 'object' === typeof header ? header : { label: header };
 		} );
 		headers.forEach( function ( header ) {
-			html += '<th scope="col"' + ( header.cls ? ' class="' + header.cls + '"' : '' ) + '>' + escapeHtml( header.label ) + '</th>';
+			// An icon/action column still needs a name for screen readers.
+			html += '<th scope="col"' + ( header.cls ? ' class="' + header.cls + '"' : '' ) + '>' +
+				( header.label ? escapeHtml( header.label ) : '<span class="screen-reader-text">' + escapeHtml( header.sr || t( 'colActions' ) ) + '</span>' ) + '</th>';
 		} );
 		html += '</tr></thead><tbody>';
 		rows.forEach( function ( row ) {
-			var cells = $.isArray( row ) ? row : row.cells;
-			html += '<tr' + ( ! $.isArray( row ) && row.cls ? ' class="' + row.cls + '"' : '' ) + '>';
+			var cells = Array.isArray( row ) ? row : row.cells;
+			html += '<tr' + ( ! Array.isArray( row ) && row.cls ? ' class="' + row.cls + '"' : '' ) + '>';
 			cells.forEach( function ( cell, index ) {
 				cell = cell && 'object' === typeof cell ? cell : { html: cell };
 				var cellCls = cell.cls || ( headers[ index ] && headers[ index ].cls ) || '';
@@ -505,7 +511,7 @@
 			if ( ! list || ! list.length ) {
 				return '';
 			}
-			var html = '<div class="blt-finding-section"><h4>' + escapeHtml( t( 'where' ) ) + '</h4><ul class="blt-finding-where">';
+			var html = '<div class="blt-finding-section"><h3>' + escapeHtml( t( 'where' ) ) + '</h3><ul class="blt-finding-where">';
 			list.forEach( function ( entry, index ) {
 				entry = String( entry );
 				html += '<li' + ( index >= WHERE_LIMIT ? ' class="is-extra" hidden' : '' ) + '>';
@@ -535,7 +541,7 @@
 			}
 			var columns = details.columns || [];
 			var rows = details.rows.map( function ( row ) {
-				return $.isArray( row ) ? row : $.map( row, function ( value ) {
+				return Array.isArray( row ) ? row : $.map( row, function ( value ) {
 					return [ value ];
 				} );
 			} );
@@ -565,7 +571,7 @@
 				return cells;
 			} );
 
-			return '<div class="blt-finding-section"><h4>' + escapeHtml( t( 'evidence' ) ) + '</h4>' + tableHtml( headers, body, 'blt-finding-table' ) + '</div>';
+			return '<div class="blt-finding-section"><h3>' + escapeHtml( t( 'evidence' ) ) + '</h3>' + tableHtml( headers, body, 'blt-finding-table' ) + '</div>';
 		},
 
 		fix: function ( item, fixed ) {
@@ -576,17 +582,17 @@
 			var html = '<div class="blt-finding-section blt-finding-fix">';
 
 			if ( 'action' === fix.type && fix.action ) {
-				html += '<h4>' + escapeHtml( t( 'fix' ) ) + '</h4><div class="blt-finding-actions">' +
+				html += '<h3>' + escapeHtml( t( 'fix' ) ) + '</h3><div class="blt-finding-actions">' +
 					'<button type="button" class="button button-primary blt-finding-apply"' + ( fixed ? ' disabled' : '' ) + '>' + escapeHtml( fix.label || t( 'applyFix' ) ) + '</button>';
 				if ( fix.destructive ) {
 					html += badge( t( 'deletesData' ), 'blt-badge-cancelled' );
 				}
 				html += '<span class="blt-finding-result' + ( fixed ? ' is-ok' : '' ) + '" role="status" aria-live="polite">' + ( fixed ? escapeHtml( fixed ) : '' ) + '</span></div>';
 			} else if ( 'link' === fix.type && safeUrl( fix.url ) ) {
-				html += '<h4>' + escapeHtml( t( 'fix' ) ) + '</h4><div class="blt-finding-actions">' +
+				html += '<h3>' + escapeHtml( t( 'fix' ) ) + '</h3><div class="blt-finding-actions">' +
 					'<a class="button button-primary" href="' + escapeHtml( safeUrl( fix.url ) ) + '">' + escapeHtml( fix.label || t( 'openFix' ) ) + '</a></div>';
 			} else if ( 'manual' === fix.type && fix.steps ) {
-				html += '<h4>' + escapeHtml( fix.label || t( 'howToFix' ) ) + '</h4><code class="blt-code">' + escapeHtml( fix.steps ) + '</code>';
+				html += '<h3>' + escapeHtml( fix.label || t( 'howToFix' ) ) + '</h3><code class="blt-code">' + escapeHtml( fix.steps ) + '</code>';
 			} else {
 				return '';
 			}
@@ -761,6 +767,7 @@
 			}
 
 			$( '#blt-perf-start' ).on( 'click', scan.start );
+			$( '#blt-perf-results' ).on( 'click', '.blt-perf-run', scan.start );
 			$( '#blt-perf-cancel' ).on( 'click', scan.cancel );
 			$( '#blt-perf-resume' ).on( 'click', scan.resume );
 
@@ -798,7 +805,7 @@
 				return;
 			}
 			scan.clearNotices();
-			$( '#blt-perf-start' ).prop( 'disabled', true );
+			$( '#blt-perf-start, .blt-perf-run' ).prop( 'disabled', true );
 
 			api.post( 'perf_start' )
 				.done( function ( response ) {
@@ -809,7 +816,7 @@
 						scan.tick();
 						return;
 					}
-					$( '#blt-perf-start' ).prop( 'disabled', false );
+					$( '#blt-perf-start, .blt-perf-run' ).prop( 'disabled', false );
 					scan.notice( response && response.data && response.data.message ? response.data.message : t( 'error' ), 'is-error' );
 					// "Already in progress" after a reload: adopt the running scan.
 					api.post( 'perf_status' ).done( function ( status ) {
@@ -821,7 +828,7 @@
 					} );
 				} )
 				.fail( function () {
-					$( '#blt-perf-start' ).prop( 'disabled', false );
+					$( '#blt-perf-start, .blt-perf-run' ).prop( 'disabled', false );
 					scan.notice( t( 'error' ), 'is-error' );
 				} );
 		},
@@ -910,7 +917,7 @@
 
 		setRunning: function ( running ) {
 			scan.running = running;
-			$( '#blt-perf-start' ).prop( 'disabled', running );
+			$( '#blt-perf-start, .blt-perf-run' ).prop( 'disabled', running );
 			$( '#blt-perf-cancel' ).prop( 'hidden', ! running );
 			$( '#blt-perf-scan' ).toggleClass( 'is-scanning', running );
 		},
@@ -965,7 +972,7 @@
 			if ( ! errors || ! errors.length ) {
 				return;
 			}
-			var html = '<div class="blt-callout blt-perf-errors" role="status"><strong>' + escapeHtml( t( 'scanErrors' ) ) + '</strong>' +
+			var html = '<div class="blt-callout is-warning blt-perf-errors" role="status"><strong>' + escapeHtml( t( 'scanErrors' ) ) + '</strong>' +
 				'<ul class="blt-error-list">';
 			errors.forEach( function ( error ) {
 				html += '<li>' + escapeHtml( error ) + '</li>';
@@ -1001,7 +1008,8 @@
 			if ( ! report ) {
 				$results.html( '<div class="blt-card"><div class="blt-card-body">' +
 					'<div class="blt-empty"><span class="blt-empty-title">' + escapeHtml( t( 'noReportTitle' ) ) + '</span>' +
-					'<span>' + escapeHtml( t( 'noReport' ) ) + '</span></div></div></div>' );
+					'<span>' + escapeHtml( t( 'noReport' ) ) + '</span>' +
+					'<button type="button" class="button button-primary blt-perf-run"' + ( scan.running ? ' disabled' : '' ) + '>' + escapeHtml( t( 'runScan' ) ) + '</button></div></div></div>' );
 				$( '#blt-perf-export' ).prop( 'hidden', true );
 				$meta.empty();
 				return;
@@ -1410,7 +1418,7 @@
 
 		// Accept a path ("/contact/") as shorthand for a URL on this site.
 		urlValue: function () {
-			var value = $.trim( $( '#blt-profiler-url' ).val() );
+			var value = trim( $( '#blt-profiler-url' ).val() );
 			if ( 0 === value.indexOf( '/' ) && 0 !== value.indexOf( '//' ) ) {
 				value = bltPerf.homeUrl.replace( /\/+$/, '' ) + value;
 			}
@@ -1575,7 +1583,7 @@
 			if ( page.tweaks_off ) {
 				html += badge( t( 'tweaksOff' ) );
 			}
-			if ( page.post && page.post.edit_url ) {
+			if ( page.post && safeUrl( page.post.edit_url ) ) {
 				html += '<a class="button button-small" href="' + escapeHtml( safeUrl( page.post.edit_url ) ) + '">' + escapeHtml( t( 'editPost' ) ) + '</a>';
 			}
 			return html + '</div></div>';
@@ -1604,7 +1612,7 @@
 				if ( isNumber( http.cached_ttfb_ms ) ) {
 					detail += ' ' + tf( 'pageCacheTtfb', ms( http.cached_ttfb_ms ) );
 				}
-				html += '<div class="blt-stack-top">' + callout( t( 'pageCacheOn' ), $.trim( detail ) ) + '</div>';
+				html += '<div class="blt-stack-top">' + callout( t( 'pageCacheOn' ), trim( detail ) ) + '</div>';
 			}
 			return html;
 		},
@@ -1869,8 +1877,7 @@
 
 			var slow = ( queries.slowest || [] ).map( function ( row ) {
 				return {
-					cls: Number( row.ms ) > 50 ? 'is-slow' : '',
-					cells: [ ms( row.ms ), compChip( row.component ) || escapeHtml( DASH ), '<code>' + escapeHtml( row.caller || '' ) + '</code>', sqlCell( row.sql ) ]
+					cells: [ { html: ms( row.ms ), cls: Number( row.ms ) > 50 ? 'num is-slow' : 'num' }, compChip( row.component ) || escapeHtml( DASH ), '<code>' + escapeHtml( row.caller || '' ) + '</code>', sqlCell( row.sql ) ]
 				};
 			} );
 			if ( slow.length ) {
@@ -1954,7 +1961,7 @@
 			html += '<h3>' + escapeHtml( t( 'scripts' ) ) + '</h3>';
 			html += scriptRows.length ? tableHtml( [
 				t( 'colHandle' ), t( 'colComponent' ), t( 'colLocation' ), t( 'colStrategy' ),
-				{ label: t( 'colSize' ), cls: 'num' }, { label: t( 'colInline' ), cls: 'num' }, ''
+				{ label: t( 'colSize' ), cls: 'num' }, { label: t( 'colInline' ), cls: 'num' }, { label: '', sr: t( 'colFlags' ) }
 			], scriptRows, 'blt-perf-assets' ) : '<p class="description">' + escapeHtml( t( 'noScripts' ) ) + '</p>';
 
 			var styleRows = styles.map( function ( row ) {
@@ -1970,7 +1977,7 @@
 			html += '<h3>' + escapeHtml( t( 'styles' ) ) + '</h3><p class="description">' + escapeHtml( t( 'stylesHint' ) ) + '</p>';
 			html += styleRows.length ? tableHtml( [
 				t( 'colHandle' ), t( 'colComponent' ), t( 'colMedia' ),
-				{ label: t( 'colSize' ), cls: 'num' }, { label: t( 'colInline' ), cls: 'num' }, ''
+				{ label: t( 'colSize' ), cls: 'num' }, { label: t( 'colInline' ), cls: 'num' }, { label: '', sr: t( 'colFlags' ) }
 			], styleRows, 'blt-perf-assets' ) : '<p class="description">' + escapeHtml( t( 'noStyles' ) ) + '</p>';
 
 			return html;
@@ -1995,7 +2002,7 @@
 				};
 			} );
 			out += '<h3>' + escapeHtml( t( 'scripts' ) ) + '</h3>';
-			out += scripts.length ? tableHtml( [ t( 'colFile' ), t( 'colHost' ), t( 'colLocation' ), t( 'colStrategy' ), '' ], scripts, 'blt-perf-assets' ) : '<p class="description">' + escapeHtml( t( 'noScripts' ) ) + '</p>';
+			out += scripts.length ? tableHtml( [ t( 'colFile' ), t( 'colHost' ), t( 'colLocation' ), t( 'colStrategy' ), { label: '', sr: t( 'colFlags' ) } ], scripts, 'blt-perf-assets' ) : '<p class="description">' + escapeHtml( t( 'noScripts' ) ) + '</p>';
 
 			var styles = ( html.stylesheets || [] ).map( function ( row ) {
 				return [ link( row.href, fileName( row.href ), true ), escapeHtml( row.host || DASH ), escapeHtml( row.in_head ? t( 'head' ) : t( 'footer' ) ), escapeHtml( row.media || 'all' ) ];
@@ -2019,12 +2026,11 @@
 			var rows = calls.map( function ( row ) {
 				var failed = row.error || Number( row.status ) >= 400 || ! Number( row.status );
 				return {
-					cls: Number( row.ms ) > 200 ? 'is-slow' : '',
 					cells: [
 						escapeHtml( row.method || 'GET' ),
 						safeUrl( row.url ) ? '<a href="' + escapeHtml( safeUrl( row.url ) ) + '" target="_blank" rel="noopener noreferrer" class="blt-perf-url">' + escapeHtml( row.url ) + '</a>' : '<code>' + escapeHtml( row.url ) + '</code>',
 						row.error ? badge( t( 'failed' ), 'blt-badge-cancelled' ) + ' <span class="blt-perf-sub">' + escapeHtml( row.error ) + '</span>' : badge( String( row.status ), failed ? 'blt-badge-cancelled' : 'blt-badge-confirmed' ),
-						ms( row.ms ),
+						{ html: ms( row.ms ), cls: Number( row.ms ) > 200 ? 'num is-slow' : 'num' },
 						compChip( row.component ) || escapeHtml( DASH ),
 						'<code>' + escapeHtml( row.caller || '' ) + '</code>'
 					]
@@ -2087,8 +2093,8 @@
 						cells: [
 							safeUrl( image.src ) ? '<a href="' + escapeHtml( safeUrl( image.src ) ) + '" target="_blank" rel="noopener noreferrer" title="' + escapeHtml( image.src ) + '">' + escapeHtml( fileName( image.src ) || image.src ) + '</a>' : escapeHtml( fileName( image.src ) ),
 							image.local ? bytes( image.bytes ) : DASH,
-							image.natural_w ? image.natural_w + '×' + image.natural_h : DASH,
-							isNumber( image.attr_w ) && isNumber( image.attr_h ) ? image.attr_w + '×' + image.attr_h : DASH,
+							image.natural_w ? escapeHtml( image.natural_w + '×' + image.natural_h ) : DASH,
+							isNumber( image.attr_w ) && isNumber( image.attr_h ) ? escapeHtml( image.attr_w + '×' + image.attr_h ) : DASH,
 							escapeHtml( String( image.format || '' ).toUpperCase() ),
 							escapeHtml( image.loading || DASH ),
 							image.has_srcset ? t( 'yes' ) : t( 'no' ),
@@ -2101,7 +2107,7 @@
 				} );
 				out += tableHtml( [
 					t( 'colImage' ), { label: t( 'colSize' ), cls: 'num' }, { label: t( 'colNatural' ), cls: 'num' }, { label: t( 'colDisplayed' ), cls: 'num' },
-					t( 'colFormat' ), t( 'colLoading' ), t( 'colSrcset' ), t( 'colInContent' ), ''
+					t( 'colFormat' ), t( 'colLoading' ), t( 'colSrcset' ), t( 'colInContent' ), { label: '', sr: t( 'colFlags' ) }
 				], rows, 'blt-perf-images' );
 			} else {
 				out += '<p class="description">' + escapeHtml( t( 'noImages' ) ) + '</p>';
@@ -2266,7 +2272,7 @@
 
 			// Condition labels come from the PHP-rendered template, so the
 			// rule table and the form always say the same thing.
-			var $template = $( $.trim( $( '#blt-rule-condition-template' ).html() ) );
+			var $template = $( trim( $( '#blt-rule-condition-template' ).html() ) );
 			$template.find( 'select option' ).each( function () {
 				tweaks.condLabels[ this.value ] = $( this ).text();
 			} );
@@ -2427,7 +2433,7 @@
 		},
 
 		addCondition: function () {
-			var $row = $( $.trim( $( '#blt-rule-condition-template' ).html() ) );
+			var $row = $( trim( $( '#blt-rule-condition-template' ).html() ) );
 			$( '#blt-rule-conditions' ).append( $row );
 			tweaks.syncCondition( $row );
 			return $row;
@@ -2444,7 +2450,7 @@
 		},
 
 		submitRule: function () {
-			var handle = $.trim( $( '#blt-rule-handle' ).val() );
+			var handle = trim( $( '#blt-rule-handle' ).val() );
 			var mode = $( '#blt-rule-mode' ).val();
 			var conditions = [];
 			var problem = '';
@@ -2457,7 +2463,7 @@
 				$( '#blt-rule-conditions .blt-cond-row' ).each( function () {
 					var type = $( this ).find( '.blt-cond-type' ).val();
 					var needsValue = '1' === $( this ).find( '.blt-cond-type option:selected' ).attr( 'data-value' );
-					var value = $.trim( $( this ).find( '.blt-cond-value' ).val() );
+					var value = trim( $( this ).find( '.blt-cond-value' ).val() );
 					if ( needsValue && ! value ) {
 						problem = t( 'ruleNeedsValue' );
 						return false;
@@ -2482,7 +2488,7 @@
 				handle: handle,
 				mode: mode,
 				conditions: JSON.stringify( conditions ),
-				note: $.trim( $( '#blt-rule-note' ).val() )
+				note: trim( $( '#blt-rule-note' ).val() )
 			} )
 				.done( function ( response ) {
 					$button.prop( 'disabled', false );

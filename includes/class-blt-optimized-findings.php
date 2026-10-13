@@ -225,7 +225,10 @@ class BLT_Optimized_Findings {
 			case 'bytes':
 				return $value / 1024;
 			case 'count':
-				return $value;
+				// A count (DOM nodes, queries, files) is a weaker signal than
+				// measured time or weight: 3,000 DOM nodes must not outrank a
+				// 1.5 s server response.
+				return $value / 10;
 		}
 		return 0.0;
 	}

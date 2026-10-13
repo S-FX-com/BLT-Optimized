@@ -40,6 +40,19 @@ defined( 'ABSPATH' ) || exit;
  * falls back to a conservative "may be unused — verify" notice.
  *
  * Output: findings built with BLT_Optimized_Findings::make(), source `profiler`.
+ *
+ * Finding ids (the `key` adds the culprit: a component key, handle, post or image):
+ *  - server:  page_error, profile_unavailable, high_ttfb, response_time (pass), page_cache,
+ *             compression, static_cache, query_count, query_time, slow_queries, duplicate_queries,
+ *             slow_plugin_load, external_http, php_errors, transient_writes, memory.
+ *  - assets:  js_weight, css_weight, render_blocking, unused, jquery_migrate, emoji, dashicons,
+ *             wc_cart_fragments, duplicate_library, third_party, google_fonts_preconnect.
+ *  - content: missing_dimensions, oversized_image, lazy_hero, legacy_format, heavy_embeds,
+ *             dom_size, html_size, inline_css, inline_js, images_ok (pass).
+ *
+ * Filters: `blt_optimized_page_findings_thresholds` (constant name => value),
+ * `blt_optimized_asset_markers`, `blt_optimized_page_findings` (final list) and
+ * `blt_optimized_page_findings_tweaks` (saved speed tweaks, for tests).
  */
 class BLT_Optimized_Page_Findings {
 
@@ -62,6 +75,7 @@ class BLT_Optimized_Page_Findings {
 	const SLOW_QUERY_CRIT_TOTAL_MS = 500;
 	const DUPLICATE_QUERY_MIN      = 5;
 	const DUPLICATE_WARN_WASTED_MS = 50;
+	const DUPLICATE_IGNORE_BELOW_MS = 5;
 	const PLUGIN_LOAD_WARN_MS      = 50;
 	const PLUGIN_LOAD_CRIT_MS      = 150;
 	const HTTP_CRIT_MS             = 1000;
@@ -89,6 +103,9 @@ class BLT_Optimized_Page_Findings {
 	const HTML_WARN_BYTES          = 300 * KB_IN_BYTES;
 	const INLINE_CSS_WARN_BYTES    = 50 * KB_IN_BYTES;
 	const INLINE_JS_WARN_BYTES     = 100 * KB_IN_BYTES;
+
+	// Asset rules (Speed Tweaks) accept at most this many conditions each.
+	const MAX_RULE_CONDITIONS      = 20;
 
 	// Presentation caps.
 	const MAX_IMAGE_FINDINGS       = 8;
@@ -258,6 +275,10 @@ class BLT_Optimized_Page_Findings {
 
 			$seen = array();
 			foreach ( self::component_costs( $profile ) as $key => $cost ) {
+				// This plugin's own instrumentation is not "who's slow".
+				if ( self::is_self( $cost['component'] ) ) {
+					continue;
+				}
 				$seen[ $key ] = true;
 				$rollup[ $key ] = self::rollup_row( $rollup, $key, $cost['component'] );
 				$rollup[ $key ]['load_ms']     += $cost['load_ms'];
@@ -481,12 +502,65 @@ class BLT_Optimized_Page_Findings {
 				),
 			),
 			array(
+				'id'        => 'woocommerce-blocks',
+				'label'     => 'WooCommerce',
+				'handles'   => array( 'wc-blocks*', 'wc-block-*', 'wc-settings', 'wc-types', 'wc-mini-cart-block*', 'woocommerce-blocks*', 'woocommerce-customer-account-style', 'wc-customer-account*' ),
+				'component' => 'woocommerce',
+				'tokens'    => array( 'wc-block-', 'wp-block-woocommerce', '=woocommerce', 'woocommerce-' ),
+				'ignore'    => array( 'woocommerce-no-js', 'woocommerce-js', 'woocommerce-demo-store', 'woocommerce-active', 'woocommerce-store-notice*', 'woocommerce-block-theme-has-button-styles', 'woocommerce-uses-block-theme' ),
+				'contexts'  => array( 'woocommerce' ),
+				'without'   => __( 'WooCommerce blocks', 'blt-optimized' ),
+				'condition' => array(
+					array(
+						'type'  => 'woocommerce',
+						'value' => '1',
+					),
+					array(
+						'type'  => 'content_contains',
+						'value' => '[woocommerce_',
+					),
+					array(
+						'type'  => 'content_contains',
+						'value' => '[product',
+					),
+					array(
+						'type'  => 'content_contains',
+						'value' => '[add_to_cart',
+					),
+					array(
+						'type'  => 'content_contains',
+						'value' => '[sale_products',
+					),
+					array(
+						'type'  => 'content_contains',
+						'value' => '[recent_products',
+					),
+					array(
+						'type'  => 'content_contains',
+						'value' => '[featured_products',
+					),
+					array(
+						'type'  => 'content_contains',
+						'value' => '[best_selling_products',
+					),
+					array(
+						'type'  => 'content_contains',
+						'value' => '[top_rated_products',
+					),
+					array(
+						'type'  => 'content_contains',
+						'value' => 'wp:woocommerce',
+					),
+				),
+			),
+			array(
 				'id'        => 'woocommerce',
 				'label'     => 'WooCommerce',
 				'handles'   => array( 'woocommerce*', 'wc-*', 'select2', 'selectWoo', 'jquery-blockui', 'js-cookie', 'sourcebuster-js', 'photoswipe*', 'zoom', 'flexslider', 'prettyPhoto*', 'jquery-payment', 'accounting' ),
 				'component' => 'woocommerce',
-				'tokens'    => array( 'woocommerce-', '=woocommerce', 'wc-block-', 'widget_shopping_cart', 'add_to_cart', '=products' ),
-				'ignore'    => array( 'woocommerce-no-js', 'woocommerce-js', 'woocommerce-demo-store', 'woocommerce-active', 'woocommerce-store-notice*', 'woocommerce-block-theme-has-button-styles', 'woocommerce-uses-block-theme' ),
+				// A header "customer account" block sits on every page and needs none of the shop scripts, so it is not proof of use.
+				'tokens'    => array( 'woocommerce-', '=woocommerce', 'wc-block-', 'wp-block-woocommerce', 'widget_shopping_cart', 'add_to_cart', '=products' ),
+				'ignore'    => array( 'woocommerce-no-js', 'woocommerce-js', 'woocommerce-demo-store', 'woocommerce-active', 'woocommerce-store-notice*', 'woocommerce-block-theme-has-button-styles', 'woocommerce-uses-block-theme', 'wc-block-customer-account*', 'wp-block-woocommerce-customer-account*' ),
 				'contexts'  => array( 'woocommerce' ),
 				'without'   => __( 'shop content', 'blt-optimized' ),
 				'condition' => array(
@@ -621,7 +695,8 @@ class BLT_Optimized_Page_Findings {
 				'ignore'    => array(),
 				'contexts'  => array(),
 				'without'   => __( 'a slider', 'blt-optimized' ),
-				// Shortcode names differ per plugin, so no automatic rule.
+				// Shortcode names differ per plugin, so no automatic rule; sliders are often started from a theme script, so detection is only a hint.
+				'verify'    => true,
 				'condition' => array(),
 			),
 			array(
@@ -644,7 +719,8 @@ class BLT_Optimized_Page_Findings {
 				'ignore'    => array(),
 				'contexts'  => array(),
 				'without'   => __( 'any icons', 'blt-optimized' ),
-				// Icons are used in templates, menus and widgets: no safe content rule.
+				// Icons are used in templates, menus and widgets, and CSS can draw them without a class: no safe content rule, and detection is only a hint.
+				'verify'    => true,
 				'condition' => array(),
 			),
 		);
@@ -747,6 +823,9 @@ class BLT_Optimized_Page_Findings {
 			$html   = ( isset( $page['html'] ) && is_array( $page['html'] ) ) ? $page['html'] : array();
 			foreach ( array( 'class_tokens', 'id_tokens' ) as $key ) {
 				foreach ( ( isset( $html[ $key ] ) && is_array( $html[ $key ] ) ) ? $html[ $key ] : array() as $token ) {
+					if ( ! is_scalar( $token ) ) {
+						continue;
+					}
 					$token = strtolower( trim( (string) $token ) );
 					if ( '' !== $token ) {
 						$tokens[ $token ] = true;
@@ -754,9 +833,12 @@ class BLT_Optimized_Page_Findings {
 				}
 			}
 
+			$tokens               = array_map( 'strval', array_keys( $tokens ) );
 			$page['_f']           = array(
 				'ref'    => self::page_ref( $url ),
-				'tokens' => array_keys( $tokens ),
+				'tokens' => $tokens,
+				// One newline-delimited string, so prefix lookups are a single strpos() instead of a loop over thousands of tokens.
+				'blob'   => $tokens ? "\n" . implode( "\n", $tokens ) . "\n" : '',
 			);
 			$page['_f']['assets'] = self::compute_assets( $page );
 			$out[]                = $page;
@@ -900,11 +982,12 @@ class BLT_Optimized_Page_Findings {
 	/**
 	 * Human file size.
 	 *
-	 * @param int|float $bytes Bytes.
+	 * @param int|float $bytes    Bytes.
+	 * @param int       $decimals Decimal places.
 	 * @return string
 	 */
-	private static function fmt_bytes( $bytes ) {
-		$text = size_format( max( 0, (int) $bytes ), 1 );
+	private static function fmt_bytes( $bytes, $decimals = 1 ) {
+		$text = size_format( max( 0, (int) $bytes ), $decimals );
 		return false === $text ? '0 B' : $text;
 	}
 
@@ -967,7 +1050,45 @@ class BLT_Optimized_Page_Findings {
 		if ( ! isset( $args['source'] ) ) {
 			$args['source'] = 'profiler';
 		}
+		// A bare number is a poor label: name what is being counted.
+		if ( isset( $args['impact']['type'], $args['impact']['value'] ) && 'count' === $args['impact']['type'] && empty( $args['impact']['label'] ) ) {
+			$args['impact']['label'] = self::count_label( isset( $args['id'] ) ? $args['id'] : '', (int) $args['impact']['value'] );
+		}
 		return BLT_Optimized_Findings::make( $args );
+	}
+
+	/**
+	 * Label for a count impact, by finding id ('' = let Findings::make default it).
+	 *
+	 * @param string $id    Finding id.
+	 * @param int    $count Value.
+	 * @return string
+	 */
+	private static function count_label( $id, $count ) {
+		$formatted = number_format_i18n( $count );
+		switch ( $id ) {
+			case 'server.page_error':
+			case 'server.profile_unavailable':
+			case 'assets.google_fonts_preconnect':
+			case 'assets.emoji':
+			case 'assets.jquery_migrate':
+			case 'assets.dashicons':
+			case 'content.lazy_hero':
+				return self::n_pages( $count );
+			case 'server.php_errors':
+				/* translators: %s: number of PHP messages. */
+				return sprintf( _n( '%s message', '%s messages', $count, 'blt-optimized' ), $formatted );
+			case 'server.transient_writes':
+				/* translators: %s: number of transients. */
+				return sprintf( _n( '%s transient', '%s transients', $count, 'blt-optimized' ), $formatted );
+			case 'assets.unused':
+				/* translators: %s: number of files. */
+				return sprintf( _n( '%s file', '%s files', $count, 'blt-optimized' ), $formatted );
+			case 'assets.duplicate_library':
+				/* translators: %s: number of extra copies of a library. */
+				return sprintf( _n( '%s extra copy', '%s extra copies', $count, 'blt-optimized' ), $formatted );
+		}
+		return '';
 	}
 
 	/**
@@ -1040,6 +1161,15 @@ class BLT_Optimized_Page_Findings {
 					self::$tweaks = array();
 				}
 			}
+
+			/**
+			 * Filters the saved speed tweaks as seen by the page findings (lets
+			 * tests and other tools simulate a tweak state).
+			 *
+			 * @param array $tweaks Saved tweaks.
+			 */
+			$filtered     = apply_filters( 'blt_optimized_page_findings_tweaks', self::$tweaks );
+			self::$tweaks = is_array( $filtered ) ? $filtered : self::$tweaks;
 		}
 		return self::$tweaks;
 	}
@@ -1325,6 +1455,11 @@ class BLT_Optimized_Page_Findings {
 		$template = (string) self::v( $page, array( 'profile', 'context', 'template' ), '' );
 		if ( '' === $template || false !== strpos( $template, 'template-canvas.php' ) ) {
 			return '';
+		}
+		// Block themes report "theme//slug" (the template's id).
+		if ( preg_match( '#^[^/]+//(.+)$#', $template, $m ) ) {
+			/* translators: %s: block template slug, e.g. "single". */
+			return sprintf( __( '%s (block template)', 'blt-optimized' ), $m[1] );
 		}
 		return basename( $template );
 	}
@@ -1877,10 +2012,16 @@ class BLT_Optimized_Page_Findings {
 				if ( ! isset( $files[ $key ] ) ) {
 					$files[ $key ] = array(
 						'result' => $result,
+						'bad'    => false,
 						'pages'  => array(),
 					);
 				}
-				$files[ $key ]['pages'][ $i ] = true;
+				// Only a page whose own check failed counts as affected.
+				if ( empty( $result['ok'] ) ) {
+					$files[ $key ]['result']        = $result;
+					$files[ $key ]['bad']           = true;
+					$files[ $key ]['pages'][ $i ]   = true;
+				}
 			}
 		}
 		if ( ! $any ) {
@@ -1889,7 +2030,7 @@ class BLT_Optimized_Page_Findings {
 
 		$bad = array();
 		foreach ( $files as $key => $file ) {
-			if ( empty( $file['result']['ok'] ) ) {
+			if ( $file['bad'] ) {
 				$bad[ $key ] = $file;
 			}
 		}
@@ -2442,6 +2583,11 @@ class BLT_Optimized_Page_Findings {
 					return $b['runs'] <=> $a['runs'];
 				}
 			);
+
+			// A handful of repeats that cost a few milliseconds is noise, not a finding.
+			if ( $worst_wasted < (float) self::t( 'DUPLICATE_IGNORE_BELOW_MS' ) && $group['max_runs'] < 3 * (int) self::t( 'DUPLICATE_QUERY_MIN' ) ) {
+				continue;
+			}
 
 			$subject  = self::comp_subject( $group['component'] );
 			$repeats  = (int) $group['repeats'];
@@ -3071,7 +3217,7 @@ class BLT_Optimized_Page_Findings {
 		$out     = array();
 		$profile = self::profile( $page );
 
-		if ( $profile ) {
+		if ( $profile && isset( $profile['assets'] ) && is_array( $profile['assets'] ) ) {
 			foreach ( array( 'scripts' => 'script', 'styles' => 'style' ) as $bucket => $type ) {
 				foreach ( (array) self::v( $profile, array( 'assets', $bucket ), array() ) as $asset ) {
 					if ( ! is_array( $asset ) || empty( $asset['handle'] ) ) {
@@ -3149,13 +3295,27 @@ class BLT_Optimized_Page_Findings {
 	}
 
 	/**
-	 * Stable key for an asset source: no query string, no scheme.
+	 * Stable key for an asset source: no query string, no scheme, and for this
+	 * site's own files just the path (so keys survive a domain change).
 	 *
 	 * @param string $src URL.
 	 * @return string
 	 */
 	private static function src_key( $src ) {
-		return preg_replace( '#^https?:#i', '', (string) strtok( (string) $src, '?' ) );
+		static $memo = array();
+		$src = (string) $src;
+		if ( isset( $memo[ $src ] ) ) {
+			return $memo[ $src ];
+		}
+		$key = preg_replace( '#^https?:#i', '', (string) strtok( $src, '?' ) );
+		if ( 0 === strpos( $key, '//' ) ) {
+			$parts = wp_parse_url( 'http:' . $key );
+			if ( ! empty( $parts['path'] ) && BLT_Optimized_Components::is_local_host( isset( $parts['host'] ) ? $parts['host'] : '' ) ) {
+				$key = $parts['path'];
+			}
+		}
+		$memo[ $src ] = $key;
+		return $key;
 	}
 
 	/**
@@ -3321,13 +3481,13 @@ class BLT_Optimized_Page_Findings {
 			$worst_ref = self::ref( $pages, $worst_i );
 			if ( 'script' === $type ) {
 				/* translators: 1: total size, 2: page path, 3: number of pages over the limit, 4: limit. */
-				$title   = sprintf( __( 'JavaScript totals %1$s on %2$s (%3$s over %4$s)', 'blt-optimized' ), self::fmt_bytes( $worst ), $worst_ref, self::n_pages( count( $over ) ), self::fmt_bytes( $kind['limit'] ) );
+				$title   = sprintf( __( 'JavaScript totals %1$s on %2$s (%3$s over %4$s)', 'blt-optimized' ), self::fmt_bytes( $worst ), $worst_ref, self::n_pages( count( $over ) ), self::fmt_bytes( $kind['limit'], 0 ) );
 				$summary = __( 'Every script has to be downloaded, parsed and run before the page becomes fully interactive, and on a mid-range phone that is the biggest cause of a slow, janky page.', 'blt-optimized' );
 				$fixlabel = __( 'Trim JavaScript', 'blt-optimized' );
 				$steps    = __( "1. Check the unused-asset findings first: scripts that load on pages that don't need them are the easiest win (one click each).\n2. Remove or replace the heaviest items in the table — each row names the plugin or theme that loads it.\n3. Turn on the Defer scripts tweak so scripts stop blocking rendering.\n4. Use Speed Tweaks → Asset rules to load heavy scripts only on the pages that need them.", 'blt-optimized' );
 			} else {
 				/* translators: 1: total size, 2: page path, 3: number of pages over the limit, 4: limit. */
-				$title   = sprintf( __( 'CSS totals %1$s on %2$s (%3$s over %4$s)', 'blt-optimized' ), self::fmt_bytes( $worst ), $worst_ref, self::n_pages( count( $over ) ), self::fmt_bytes( $kind['limit'] ) );
+				$title   = sprintf( __( 'CSS totals %1$s on %2$s (%3$s over %4$s)', 'blt-optimized' ), self::fmt_bytes( $worst ), $worst_ref, self::n_pages( count( $over ) ), self::fmt_bytes( $kind['limit'], 0 ) );
 				$summary = __( 'The browser will not paint anything until it has downloaded and parsed all the stylesheets in the page head, so every extra kilobyte delays the first thing a visitor sees.', 'blt-optimized' );
 				$fixlabel = __( 'Trim CSS', 'blt-optimized' );
 				$steps    = __( "1. Check the unused-asset findings first: stylesheets from plugins that are not used on a page can be switched off per page (one click each).\n2. Remove or replace the heaviest items in the table — each row names the plugin or theme that loads it.\n3. Prefer one icon/font library to several, and avoid page builders' global CSS where you can.\n4. Use Speed Tweaks → Asset rules to load heavy stylesheets only where needed.", 'blt-optimized' );
@@ -3589,6 +3749,7 @@ class BLT_Optimized_Page_Findings {
 				'ignore'    => array_values( array_filter( array_map( 'strtolower', array_map( 'strval', isset( $marker['ignore'] ) ? (array) $marker['ignore'] : array() ) ), 'strlen' ) ),
 				'contexts'  => array_values( array_filter( array_map( 'strval', isset( $marker['contexts'] ) ? (array) $marker['contexts'] : array() ), 'strlen' ) ),
 				'without'   => isset( $marker['without'] ) && '' !== $marker['without'] ? (string) $marker['without'] : __( 'anything that uses it', 'blt-optimized' ),
+				'verify'    => ! empty( $marker['verify'] ),
 				'condition' => $conditions,
 			);
 		}
@@ -3623,23 +3784,29 @@ class BLT_Optimized_Page_Findings {
 	/**
 	 * Whether any of the page's class/id tokens proves use of an asset family.
 	 *
-	 * @param string[] $tokens  Lowercase tokens.
+	 * @param array    $page    Prepared page (its lowercase class/id tokens).
 	 * @param string[] $needles Prefixes (a leading "=" means exact).
 	 * @param string[] $ignore  fnmatch patterns that never count.
 	 * @return bool
 	 */
-	private static function tokens_match( array $tokens, array $needles, array $ignore ) {
-		if ( ! $tokens || ! $needles ) {
+	private static function tokens_match( array $page, array $needles, array $ignore ) {
+		$blob = isset( $page['_f']['blob'] ) ? $page['_f']['blob'] : '';
+		if ( '' === $blob || ! $needles ) {
 			return false;
 		}
-		foreach ( $tokens as $token ) {
-			foreach ( $needles as $needle ) {
-				if ( 0 === strpos( $needle, '=' ) ) {
-					$hit = substr( $needle, 1 ) === $token;
-				} else {
-					$hit = 0 === strpos( $token, $needle );
-				}
-				if ( $hit && ( ! $ignore || ! self::matches_any( $token, $ignore ) ) ) {
+		foreach ( $needles as $needle ) {
+			$exact  = 0 === strpos( $needle, '=' );
+			$search = $exact ? substr( $needle, 1 ) : $needle;
+			if ( false === strpos( $blob, "\n" . $search . ( $exact ? "\n" : '' ) ) ) {
+				continue;
+			}
+			if ( ! $ignore ) {
+				return true;
+			}
+			// Something matches; make sure it is not just a sitewide class on the ignore list.
+			foreach ( $page['_f']['tokens'] as $token ) {
+				$hit = $exact ? $search === $token : 0 === strpos( $token, $search );
+				if ( $hit && ! self::matches_any( $token, $ignore ) ) {
 					return true;
 				}
 			}
@@ -3660,7 +3827,7 @@ class BLT_Optimized_Page_Findings {
 				return true;
 			}
 		}
-		return self::tokens_match( $page['_f']['tokens'], $marker['tokens'], $marker['ignore'] );
+		return self::tokens_match( $page, $marker['tokens'], $marker['ignore'] );
 	}
 
 	/**
@@ -3720,11 +3887,13 @@ class BLT_Optimized_Page_Findings {
 	 * @return bool
 	 */
 	private static function stems_present( array $page, array $stems ) {
-		foreach ( $page['_f']['tokens'] as $token ) {
-			foreach ( $stems as $stem ) {
-				if ( 0 === strpos( $token, $stem ) || false !== strpos( $token, '-' . $stem ) || false !== strpos( $token, '_' . $stem ) ) {
-					return true;
-				}
+		$blob = isset( $page['_f']['blob'] ) ? $page['_f']['blob'] : '';
+		if ( '' === $blob ) {
+			return false;
+		}
+		foreach ( $stems as $stem ) {
+			if ( false !== strpos( $blob, "\n" . $stem ) || false !== strpos( $blob, '-' . $stem ) || false !== strpos( $blob, '_' . $stem ) ) {
+				return true;
 			}
 		}
 		return false;
@@ -3744,9 +3913,10 @@ class BLT_Optimized_Page_Findings {
 		if ( null === self::$markers ) {
 			self::$markers = self::asset_markers();
 		}
-		$markers = self::$markers;
-		$groups  = array();
-		$generic = array();
+		$markers    = self::$markers;
+		$groups     = array();
+		$generic    = array();
+		$used_cache = array();
 
 		foreach ( $pages as $i => $page ) {
 			foreach ( self::page_assets( $page ) as $asset ) {
@@ -3756,6 +3926,10 @@ class BLT_Optimized_Page_Findings {
 				}
 				// Cart fragments get their own, more specific finding.
 				if ( 'script' === $asset['type'] && 'wc-cart-fragments' === $handle ) {
+					continue;
+				}
+				// A handle with no file and no inline code costs nothing to load.
+				if ( '' === $asset['src'] && $asset['inline_bytes'] <= 0 ) {
 					continue;
 				}
 				$akey  = $asset['type'] . '|' . $handle;
@@ -3773,7 +3947,10 @@ class BLT_Optimized_Page_Findings {
 							'assets'      => array(),
 						);
 					}
-					if ( self::marker_used( $page, $marker ) ) {
+					if ( ! isset( $used_cache[ $i ][ $index ] ) ) {
+						$used_cache[ $i ][ $index ] = self::marker_used( $page, $marker );
+					}
+					if ( $used_cache[ $i ][ $index ] ) {
 						$groups[ $gkey ]['used_loaded'][ $i ] = true;
 						continue;
 					}
@@ -3857,11 +4034,14 @@ class BLT_Optimized_Page_Findings {
 
 		$summary = sprintf(
 			/* translators: 1: pages count, 2: what they lack, 3: size. */
-			__( 'These files are downloaded and run on %1$s that show no sign of %2$s, so every visit to them pays for code it never uses (%3$s per page at most). Loading them only where they are needed makes those pages lighter and faster.', 'blt-optimized' ),
+			__( 'These files are downloaded and run on %1$s with no sign of %2$s, so every one of those visits pays for code it never uses (up to %3$s per page). Loading them only where they are needed makes those pages lighter and faster.', 'blt-optimized' ),
 			self::n_pages( count( $unused_pages ) ),
 			$marker['without'],
 			$stats['worst_bytes'] > 0 ? self::fmt_bytes( $stats['worst_bytes'] ) : __( 'a few KB', 'blt-optimized' )
 		);
+		if ( $marker['verify'] ) {
+			$summary .= ' ' . __( 'This is judged from the page markup; some of these libraries are started by JavaScript or CSS without leaving a trace, so check the page before removing anything.', 'blt-optimized' );
+		}
 		$used = array_diff( array_keys( $group['used_loaded'] ), $unused_pages );
 		if ( $used ) {
 			$refs = array();
@@ -3877,9 +4057,10 @@ class BLT_Optimized_Page_Findings {
 		}
 
 		// Fix.
-		$fix = null;
-		if ( ! empty( $marker['condition'] ) ) {
-			$conditions = self::augment_conditions( $marker['condition'], $pages, $group['used_loaded'] );
+		$fix        = null;
+		$conditions = ! empty( $marker['condition'] ) ? self::augment_conditions( $marker['condition'], $pages, $group['used_loaded'] ) : array();
+		// Asset rules accept at most 20 conditions; beyond that a one-click rule cannot keep every page that uses the asset.
+		if ( ! empty( $conditions ) && count( $conditions ) <= self::MAX_RULE_CONDITIONS ) {
 			$rules      = array();
 			$primary    = null;
 			foreach ( $group['assets'] as $asset ) {
@@ -3928,7 +4109,7 @@ class BLT_Optimized_Page_Findings {
 				'id'        => 'assets.unused',
 				'key'       => 'assets.unused:' . $marker['id'] . ( '' === $marker['component'] ? ':' . BLT_Optimized_Components::key( $group['component'] ) : '' ),
 				'category'  => 'assets',
-				'severity'  => ( $stats['worst_bytes'] >= (int) self::t( 'UNUSED_WARN_BYTES' ) || count( $group['assets'] ) >= 3 ) ? 'warning' : 'notice',
+				'severity'  => ( ! $marker['verify'] && ( $stats['worst_bytes'] >= (int) self::t( 'UNUSED_WARN_BYTES' ) || count( $group['assets'] ) >= 3 ) ) ? 'warning' : 'notice',
 				'title'     => $title,
 				'summary'   => $summary,
 				'impact'    => $stats['worst_bytes'] > 0
@@ -4026,6 +4207,16 @@ class BLT_Optimized_Page_Findings {
 	}
 
 	/**
+	 * What loading an asset costs: its file plus any inline code attached to it.
+	 *
+	 * @param array $asset Asset.
+	 * @return int
+	 */
+	private static function asset_weight( array $asset ) {
+		return (int) $asset['bytes'] + (int) $asset['inline_bytes'];
+	}
+
+	/**
 	 * Per-page unused-weight statistics.
 	 *
 	 * @param array[] $pages  Prepared pages.
@@ -4037,7 +4228,7 @@ class BLT_Optimized_Page_Findings {
 		foreach ( $unused as $assets ) {
 			$sum = 0;
 			foreach ( $assets as $asset ) {
-				$sum += $asset['bytes'];
+				$sum += self::asset_weight( $asset );
 			}
 			$worst = max( $worst, $sum );
 		}
@@ -4057,12 +4248,13 @@ class BLT_Optimized_Page_Findings {
 			$parts = array();
 			$sum   = 0;
 			foreach ( $assets as $asset ) {
-				$sum    += $asset['bytes'];
+				$weight  = self::asset_weight( $asset );
+				$sum    += $weight;
 				$parts[] = sprintf(
 					'%1$s (%2$s%3$s)',
 					$asset['handle'],
 					'script' === $asset['type'] ? 'JS' : 'CSS',
-					$asset['bytes'] > 0 ? ', ' . self::fmt_bytes( $asset['bytes'] ) : ''
+					$weight > 0 ? ', ' . self::fmt_bytes( $weight ) : ''
 				);
 			}
 			$template = self::template_name( $pages[ $i ] );
@@ -4147,7 +4339,7 @@ class BLT_Optimized_Page_Findings {
 					break;
 				case 'post_ids':
 					/* translators: %s: comma-separated post IDs. */
-					$parts[] = sprintf( __( 'the post ID is one of %s', 'blt-optimized' ), $value );
+					$parts[] = false === strpos( $value, ',' ) ? sprintf( __( 'the post ID is %s', 'blt-optimized' ), $value ) : sprintf( __( 'the post ID is one of %s', 'blt-optimized' ), $value );
 					break;
 				case 'post_type':
 					/* translators: %s: post type. */
@@ -4505,7 +4697,7 @@ class BLT_Optimized_Page_Findings {
 				continue;
 			}
 			// A page that actually uses dashicon classes needs the font.
-			if ( self::tokens_match( $page['_f']['tokens'], array( 'dashicons' ), array() ) ) {
+			if ( self::tokens_match( $page, array( 'dashicons' ), array() ) ) {
 				continue;
 			}
 			$idx[]  = $i;
@@ -4594,7 +4786,7 @@ class BLT_Optimized_Page_Findings {
 				continue;
 			}
 			// A live mini-cart in the header or a widget needs the fragments.
-			if ( self::tokens_match( $page['_f']['tokens'], array( 'widget_shopping_cart', 'wc-block-mini-cart', 'woocommerce-mini-cart', 'site-header-cart', 'cart-contents', 'wc-block-cart' ), array() ) ) {
+			if ( self::tokens_match( $page, array( 'widget_shopping_cart', 'wc-block-mini-cart', 'woocommerce-mini-cart', 'site-header-cart', 'cart-contents', 'wc-block-cart' ), array() ) ) {
 				continue;
 			}
 			$idx[]   = $i;
@@ -4748,9 +4940,11 @@ class BLT_Optimized_Page_Findings {
 				}
 				$path = strtolower( (string) wp_parse_url( $asset['src'], PHP_URL_PATH ) );
 				$base = basename( $path );
+				$handle = strtolower( (string) $asset['handle'] );
 				foreach ( $signatures as $lib => $signature ) {
 					$subject = 'path' === $signature['match'] ? $path : $base;
-					if ( preg_match( $signature['regex'], $subject ) ) {
+					// The handle is a second opinion: a library file named all.min.css is still Font Awesome when its handle says so.
+					if ( preg_match( $signature['regex'], $subject ) || ( '' !== $handle && preg_match( $signature['regex'], $handle ) ) ) {
 						$per_lib[ $lib . '|' . $asset['type'] ][ self::src_key( $asset['src'] ) ] = $asset;
 						break;
 					}
@@ -5086,9 +5280,22 @@ class BLT_Optimized_Page_Findings {
 				'index'      => isset( $img['index'] ) ? (int) $img['index'] : $n,
 				'in_content' => $in_content,
 				'post'       => $in_content ? $post : null,
+				'modern'     => ! empty( $img['picture_modern'] ),
 			);
 		}
 		return $out;
+	}
+
+	/**
+	 * The plugin or theme whose own directory an image file lives in (null for
+	 * uploads and external images).
+	 *
+	 * @param array $img Normalised image.
+	 * @return array|null
+	 */
+	private static function image_file_owner( array $img ) {
+		$from = BLT_Optimized_Components::from_url( $img['src'] );
+		return in_array( $from['type'], array( 'plugin', 'mu-plugin', 'theme' ), true ) ? $from : null;
 	}
 
 	/**
@@ -5198,14 +5405,40 @@ class BLT_Optimized_Page_Findings {
 			return array();
 		}
 
-		$findings = array();
+		$findings   = array();
 		$img_groups = array();
+		$by_owner   = array();
 		foreach ( $groups as $gkey => $group ) {
 			if ( $group['post'] ) {
 				$findings[] = self::missing_dimensions_finding( $pages, $gkey, array( $group ) );
-			} else {
-				$img_groups[ $gkey ] = $group;
+				continue;
 			}
+			$img_groups[ $gkey ] = $group;
+			$owner               = self::image_file_owner( $group['first'] );
+			if ( $owner ) {
+				$by_owner[ BLT_Optimized_Components::key( $owner ) ][] = $gkey;
+			}
+		}
+		// Several images from the same theme or plugin: the culprit is that component, not each file.
+		foreach ( $by_owner as $owner_key => $gkeys ) {
+			if ( count( $gkeys ) < 2 ) {
+				continue;
+			}
+			$merged = array(
+				'post'      => null,
+				'items'     => array(),
+				'pages'     => array(),
+				'images'    => array(),
+				'first'     => $img_groups[ $gkeys[0] ]['first'],
+				'component' => self::image_file_owner( $img_groups[ $gkeys[0] ]['first'] ),
+			);
+			foreach ( $gkeys as $gkey ) {
+				$merged['items']  = array_merge( $merged['items'], $img_groups[ $gkey ]['items'] );
+				$merged['pages'] += $img_groups[ $gkey ]['pages'];
+				$merged['images'] += $img_groups[ $gkey ]['images'];
+				unset( $img_groups[ $gkey ] );
+			}
+			$img_groups[ 'comp:' . $owner_key ] = $merged;
 		}
 		uasort(
 			$img_groups,
@@ -5285,6 +5518,16 @@ class BLT_Optimized_Page_Findings {
 				self::n_pages( count( array_unique( $idx ) ) )
 			);
 			$component = self::image_component( $pages[ $idx[0] ], $first );
+		}
+		if ( 0 === strpos( $gkey, 'comp:' ) && ! empty( $groups[0]['component'] ) ) {
+			$component = $groups[0]['component'];
+			$title     = sprintf(
+				/* translators: 1: component (e.g. "The Twenty Twenty-Four theme"), 2: number of images, 3: number of pages. */
+				_n( '%1$s outputs %2$s image without width and height on %3$s (causes layout shift)', '%1$s outputs %2$s images without width and height on %3$s (causes layout shift)', $count, 'blt-optimized' ),
+				self::comp_subject( $component ),
+				number_format_i18n( $count ),
+				self::n_pages( count( array_unique( $idx ) ) )
+			);
 		}
 
 		$summary = __( 'Without width and height attributes the browser cannot reserve space for the image, so the text below it jumps down when the image arrives. That layout shift is part of Google\'s Core Web Vitals (CLS) and is what makes pages feel unstable.', 'blt-optimized' );
@@ -5455,6 +5698,9 @@ class BLT_Optimized_Page_Findings {
 				$summary .= ' ' . sprintf( __( 'Resized to about %1$s px (still sharp on high-density screens) it would weigh roughly %2$s.', 'blt-optimized' ), number_format_i18n( $target ), self::fmt_bytes( $estimate ) );
 			}
 		}
+		if ( $img['bytes'] > (int) self::t( 'OVERSIZED_BYTES' ) && false === strpos( $summary, 'roughly' ) ) {
+			$summary .= ' ' . __( 'Compressing it, or serving it as WebP, typically saves a quarter to a third without a visible difference.', 'blt-optimized' );
+		}
 		if ( ! $post ) {
 			$hint = self::template_hint( $pages, $idx );
 			if ( '' !== $hint ) {
@@ -5479,9 +5725,9 @@ class BLT_Optimized_Page_Findings {
 						'label' => '',
 					)
 					: array(
-						'type'  => 'count',
-						'value' => 1,
-						'label' => '',
+						'type'  => 'none',
+						'value' => 0,
+						'label' => __( 'size unknown', 'blt-optimized' ),
 					),
 				'component' => self::image_component( $pages[ $idx[0] ], $img ),
 				'where'     => array_merge( self::urls( $pages, $idx ), array( $img['src'] ) ),
@@ -5667,7 +5913,8 @@ class BLT_Optimized_Page_Findings {
 		$per_page = array();
 		foreach ( $pages as $i => $page ) {
 			foreach ( self::page_images( $page ) as $img ) {
-				if ( ! in_array( $img['format'], array( 'jpg', 'jpeg', 'png' ), true ) || $img['bytes'] <= $limit ) {
+				// Already offered as WebP/AVIF through <picture>? Nothing to gain.
+				if ( ! in_array( $img['format'], array( 'jpg', 'jpeg', 'png' ), true ) || $img['bytes'] <= $limit || $img['modern'] ) {
 					continue;
 				}
 				$key = $img['key'];
@@ -5826,7 +6073,7 @@ class BLT_Optimized_Page_Findings {
 			$idx = array_keys( $group['per_page'] );
 
 			// Estimated weight on the worst page.
-			$weights = self::EMBED_WEIGHTS;
+			$weights = (array) self::t( 'EMBED_WEIGHTS' );
 			$worst   = 0;
 			foreach ( $group['per_page'] as $frames ) {
 				$sum = 0;
@@ -6037,7 +6284,7 @@ class BLT_Optimized_Page_Findings {
 			'Bricks'       => array( 'brxe-' ),
 		);
 		foreach ( $builders as $name => $needles ) {
-			if ( self::tokens_match( $page['_f']['tokens'], $needles, array() ) ) {
+			if ( self::tokens_match( $page, $needles, array() ) ) {
 				return $name;
 			}
 		}
@@ -6086,7 +6333,7 @@ class BLT_Optimized_Page_Findings {
 		}
 
 		/* translators: 1: page path, 2: size, 3: number of pages over the limit, 4: limit. */
-		$title = sprintf( __( 'The HTML of %1$s is %2$s (%3$s over %4$s)', 'blt-optimized' ), self::ref( $pages, $worst_i ), self::fmt_bytes( $worst ), self::n_pages( count( $over ) ), self::fmt_bytes( $limit ) );
+		$title = sprintf( __( 'The HTML of %1$s is %2$s (%3$s over %4$s)', 'blt-optimized' ), self::ref( $pages, $worst_i ), self::fmt_bytes( $worst ), self::n_pages( count( $over ) ), self::fmt_bytes( $limit, 0 ) );
 
 		return array(
 			self::finding(
@@ -6182,7 +6429,9 @@ class BLT_Optimized_Page_Findings {
 					),
 					'fix'       => self::fix_manual(
 						__( 'Move it into a file', 'blt-optimized' ),
-						__( "1. Find the plugin or theme option that generates the largest block (named in the table) — builders usually offer \"external CSS file\" or \"CSS print method: external\".\n2. Remove unused custom CSS and unused theme/global style options.\n3. Re-scan to confirm.", 'blt-optimized' )
+						self::is_core( $owner )
+							? __( "WordPress core prints this from your theme's global styles (theme.json), so it cannot be moved into a file.\n1. Remove colour, gradient, font-size and spacing presets your theme ships but you never use (in theme.json or the Site Editor's Styles) — every preset adds CSS.\n2. Prefer a lighter block theme if it stays large.\n3. Re-scan to confirm.", 'blt-optimized' )
+							: __( "1. Find the plugin or theme option that generates the largest block (named in the table) — builders usually offer \"external CSS file\" or \"CSS print method: external\".\n2. Remove unused custom CSS and unused theme/global style options.\n3. Re-scan to confirm.", 'blt-optimized' )
 					),
 				)
 			);

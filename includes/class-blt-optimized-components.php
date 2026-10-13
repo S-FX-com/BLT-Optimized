@@ -225,8 +225,9 @@ class BLT_Optimized_Components {
 			}
 			$file = wp_normalize_path( $frame['file'] );
 
-			// Skip this plugin's own instrumentation frames.
-			if ( 0 === strpos( $file, $self_dir . 'includes/class-blt-optimized-profiler.php' )
+			// Skip this plugin's own instrumentation frames (the profiler gate
+			// and its collector share the prefix).
+			if ( 0 === strpos( $file, $self_dir . 'includes/class-blt-optimized-profiler' )
 				|| 0 === strpos( $file, $self_dir . 'includes/class-blt-optimized-components.php' ) ) {
 				continue;
 			}

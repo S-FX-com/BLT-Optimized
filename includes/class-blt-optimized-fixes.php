@@ -228,33 +228,89 @@ class BLT_Optimized_Fixes {
 	}
 
 	/**
-	 * Add (or replace) an asset rule.
+	 * Add (or replace) asset rules.
 	 *
-	 * @param array $args { type, handle, mode, conditions[] }.
+	 * A finding about one asset family (Contact Form 7's scripts and its
+	 * stylesheet, say) carries every handle in `rules`, so one click removes
+	 * the whole family; the top-level fields describe the primary handle and
+	 * are used alone when `rules` is absent. Every rule is validated before
+	 * any is saved, so a family is never left half-applied.
+	 *
+	 * @param array $args { type, handle, mode, conditions[], note?, rules?: array[] }.
 	 * @return array|WP_Error
 	 */
 	private function fix_asset_rule( array $args ) {
-		foreach ( array( 'type', 'handle', 'mode' ) as $required ) {
-			if ( ! isset( $args[ $required ] ) || ! is_string( $args[ $required ] ) ) {
-				return $this->invalid( __( 'An asset rule needs a type, handle and mode.', 'blt-optimized' ) );
-			}
-		}
-		if ( isset( $args['conditions'] ) && ! is_array( $args['conditions'] ) ) {
-			return $this->invalid( __( 'Asset rule conditions must be a list.', 'blt-optimized' ) );
+		$specs = ( isset( $args['rules'] ) && is_array( $args['rules'] ) && $args['rules'] ) ? array_values( $args['rules'] ) : array( $args );
+		if ( count( $specs ) > 20 ) {
+			return $this->invalid( __( 'Too many asset rules in one fix.', 'blt-optimized' ) );
 		}
 
-		$rule = BLT_Optimized_Tweaks::add_rule(
-			array(
-				'type'       => $args['type'],
-				'handle'     => $args['handle'],
-				'mode'       => $args['mode'],
-				'conditions' => isset( $args['conditions'] ) ? $args['conditions'] : array(),
-				'note'       => __( 'Added by the Performance Scan.', 'blt-optimized' ),
-			)
-		);
-		if ( is_wp_error( $rule ) ) {
-			return $rule;
+		$note  = ( isset( $args['note'] ) && is_string( $args['note'] ) && '' !== trim( $args['note'] ) )
+			? sanitize_text_field( $args['note'] )
+			: __( 'Added by the Performance Scan.', 'blt-optimized' );
+		$clean = array();
+
+		foreach ( $specs as $spec ) {
+			if ( ! is_array( $spec ) ) {
+				return $this->invalid( __( 'An asset rule needs a type, handle and mode.', 'blt-optimized' ) );
+			}
+			foreach ( array( 'type', 'handle', 'mode' ) as $required ) {
+				if ( ! isset( $spec[ $required ] ) || ! is_string( $spec[ $required ] ) ) {
+					return $this->invalid( __( 'An asset rule needs a type, handle and mode.', 'blt-optimized' ) );
+				}
+			}
+			if ( isset( $spec['conditions'] ) && ! is_array( $spec['conditions'] ) ) {
+				return $this->invalid( __( 'Asset rule conditions must be a list.', 'blt-optimized' ) );
+			}
+
+			$candidate = array(
+				'type'       => $spec['type'],
+				'handle'     => $spec['handle'],
+				'mode'       => $spec['mode'],
+				'conditions' => isset( $spec['conditions'] ) ? $spec['conditions'] : array(),
+				'note'       => $note,
+			);
+			$valid     = BLT_Optimized_Tweaks::check_rule( $candidate );
+			if ( is_wp_error( $valid ) ) {
+				return $valid;
+			}
+			$clean[] = $candidate;
 		}
+
+		$saved = array();
+		foreach ( $clean as $candidate ) {
+			$stored = BLT_Optimized_Tweaks::add_rule( $candidate );
+			if ( is_wp_error( $stored ) ) {
+				// Only the rule cap can fail here; report what was saved.
+				if ( $saved ) {
+					return array(
+						'message' => sprintf(
+							/* translators: 1: number of rules saved, 2: error message. */
+							__( 'Saved %1$d asset rules, then stopped: %2$s', 'blt-optimized' ),
+							count( $saved ),
+							$stored->get_error_message()
+						),
+						'changed' => true,
+					);
+				}
+				return $stored;
+			}
+			$saved[] = $stored;
+		}
+
+		if ( count( $saved ) > 1 ) {
+			return array(
+				'message' => sprintf(
+					/* translators: 1: number of rules, 2: comma-separated handles. */
+					__( 'Saved %1$d asset rules (%2$s). Speed Tweaks → Asset rules lists them; switch any off there.', 'blt-optimized' ),
+					count( $saved ),
+					implode( ', ', wp_list_pluck( $saved, 'handle' ) )
+				),
+				'changed' => true,
+			);
+		}
+
+		$rule = $saved[0];
 
 		$where = '';
 		if ( 'except' === $rule['mode'] ) {

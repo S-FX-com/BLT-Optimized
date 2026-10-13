@@ -1151,8 +1151,12 @@ class BLT_Optimized_Tweaks {
 				break;
 
 			case 'url_contains':
+				// Path only: a visitor-chosen query string (/?x=/contact/) must
+				// not be able to flip a rule — and a page cache that ignores
+				// query args could then store that variant for everyone.
 				$uri   = isset( $_SERVER['REQUEST_URI'] ) ? (string) wp_unslash( $_SERVER['REQUEST_URI'] ) : ''; // phpcs:ignore WordPress.Security.ValidatedSanitizedInput.InputNotSanitized
-				$match = '' !== $value && false !== stripos( $uri, $value );
+				$path  = (string) wp_parse_url( $uri, PHP_URL_PATH );
+				$match = '' !== $value && false !== stripos( $path, $value );
 				break;
 		}
 

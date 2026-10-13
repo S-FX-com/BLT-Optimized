@@ -101,7 +101,7 @@ class BLT_Optimized_Profiler {
 	 * @return array|null Result, or null when the request has not stored one.
 	 */
 	public static function get_result( string $token ): ?array {
-		if ( 1 !== preg_match( '/^[A-Za-z0-9]{32}$/', $token ) ) {
+		if ( 1 !== preg_match( '/^[A-Za-z0-9]{32}\z/', $token ) ) {
 			return null;
 		}
 		$key = self::RESULT_PREFIX . $token;

@@ -748,6 +748,9 @@ class BLT_Optimized_Fixes {
 		if ( has_action( $hook ) ) {
 			return new WP_Error( 'blt_fix_refused', __( 'Something is still listening to that hook, so its scheduled events are not orphaned.', 'blt-optimized' ) );
 		}
+		if ( $this->plugin->health->cron_hook_owner_active( $hook ) ) {
+			return new WP_Error( 'blt_fix_refused', __( 'That hook appears to belong to an active plugin, which may register its handler only while WP-Cron runs. It was left alone.', 'blt-optimized' ) );
+		}
 
 		$core_hooks = array(
 			'delete_expired_transients',

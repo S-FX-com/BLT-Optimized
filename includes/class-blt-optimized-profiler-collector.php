@@ -245,7 +245,7 @@ class BLT_Optimized_Profiler_Collector extends BLT_Optimized_Profiler {
 
 		// The token is validated against a strict pattern below; nothing else is read from the request here.
 		$token = isset( $_GET[ self::QUERY_ARG ] ) ? wp_unslash( $_GET[ self::QUERY_ARG ] ) : ''; // phpcs:ignore WordPress.Security.NonceVerification.Recommended, WordPress.Security.ValidatedSanitizedInput.InputNotSanitized
-		if ( ! is_string( $token ) || 1 !== preg_match( '/^[A-Za-z0-9]{32}$/', $token ) ) {
+		if ( ! is_string( $token ) || 1 !== preg_match( '/^[A-Za-z0-9]{32}\z/', $token ) ) {
 			return;
 		}
 

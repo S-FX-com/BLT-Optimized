@@ -1108,8 +1108,9 @@ class BLT_Optimized_Health_Checks {
 		$plugins  = $this->installed_plugins();
 		$findings = array();
 		foreach ( array_slice( $orphans, 0, self::CRON_ORPHAN_CAP, true ) as $hook => $data ) {
-			$owner      = $this->guess_owner( $hook, 'hook' );
-			$owner_note = '';
+			$owner        = $this->guess_owner( $hook, 'hook' );
+			$owner_active = $this->cron_hook_owner_active( $hook );
+			$owner_note   = '';
 			if ( $owner && 'plugin' === $owner['type'] ) {
 				$owner_note = isset( $plugins[ $owner['slug'] ] )
 					? ( $plugins[ $owner['slug'] ]['active']
@@ -1126,7 +1127,7 @@ class BLT_Optimized_Health_Checks {
 					'id'        => 'db.cron_orphan',
 					'key'       => 'db.cron_orphan:' . $hook,
 					'category'  => 'database',
-					'severity'  => 'warning',
+					'severity'  => $owner_active ? 'notice' : 'warning',
 					/* translators: %s: cron hook name. */
 					'title'     => sprintf( __( 'Cron hook “%s” is scheduled but nothing handles it', 'blt-optimized' ), $hook ),
 					'summary'   => trim(
@@ -1160,7 +1161,19 @@ class BLT_Optimized_Health_Checks {
 							array( __( 'Likely owner', 'blt-optimized' ), $owner ? BLT_Optimized_Components::label( $owner ) : __( 'unknown', 'blt-optimized' ) ),
 						)
 					),
-					'fix'       => array(
+					// An active owner may register its handler only while
+					// WP-Cron itself runs, which this admin request can't see —
+					// so no one-click delete for those.
+					'fix'       => $owner_active ? array(
+						'type'  => 'manual',
+						'label' => __( 'How to check', 'blt-optimized' ),
+						'steps' => sprintf(
+							/* translators: 1: plugin name, 2: hook name. */
+							__( '%1$s is active, and some plugins only register their cron handlers while WP-Cron itself is running — so “%2$s” may not be orphaned. Check the plugin\'s documentation or ask its developer. If it really is left over, remove it with WP-CLI: wp cron event delete %2$s', 'blt-optimized' ),
+							$owner['name'],
+							$hook
+						),
+					) : array(
 						'type'        => 'action',
 						'label'       => __( 'Delete cron hook', 'blt-optimized' ),
 						'action'      => 'delete_cron_hook',
@@ -2668,6 +2681,23 @@ class BLT_Optimized_Health_Checks {
 
 		$this->memo['owner_map'] = $map;
 		return $map;
+	}
+
+	/**
+	 * Whether a cron hook's name points at a plugin that is installed and
+	 * active. Such a hook may only look orphaned: some plugins register their
+	 * handler only while WP-Cron runs, which an admin request never sees.
+	 *
+	 * @param string $hook Cron hook name.
+	 * @return bool
+	 */
+		public function cron_hook_owner_active( $hook ) {
+		$owner = $this->guess_owner( $hook, 'hook' );
+		if ( ! $owner || 'plugin' !== $owner['type'] ) {
+			return false;
+		}
+		$plugins = $this->installed_plugins();
+		return isset( $plugins[ $owner['slug'] ] ) && ! empty( $plugins[ $owner['slug'] ]['active'] );
 	}
 
 	/**

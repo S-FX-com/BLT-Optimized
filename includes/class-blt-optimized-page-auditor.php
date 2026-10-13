@@ -396,7 +396,7 @@ class BLT_Optimized_Page_Auditor {
 
 		$status = (int) $response['status'];
 		if ( 401 === $status ) {
-			return $this->auth_error( $current, '' !== $this->auth_header() );
+			return $this->auth_error( $current, '' !== $this->auth_header( $current ) );
 		}
 		if ( 403 === $status || 429 === $status || ( 503 === $status && isset( $response['headers']['cf-mitigated'] ) ) ) {
 			return $this->blocked_error( $current, $status );
@@ -529,9 +529,9 @@ class BLT_Optimized_Page_Auditor {
 		$asset_url = $valid;
 
 		$headers = array( 'Accept-Encoding' => $this->accept_encoding() );
-		$auth    = $this->auth_header();
+		$auth    = $this->auth_header( $asset_url );
 		if ( '' !== $auth ) {
-			$headers['Authorization'] = $auth; // Safe: validated local URL and redirection is 0.
+			$headers['Authorization'] = $auth; // Only for the exact home host + scheme; redirection is 0.
 		}
 		$args = array(
 			'timeout'     => self::TIMEOUT_HEAD,
@@ -850,9 +850,9 @@ class BLT_Optimized_Page_Auditor {
 			$headers['Cache-Control'] = 'no-cache';
 			$headers['Pragma']        = 'no-cache';
 		}
-		$auth = $this->auth_header();
+		$auth = $this->auth_header( $url );
 		if ( '' !== $auth ) {
-			$headers['Authorization'] = $auth; // Redirects are followed by hand and only to this host.
+			$headers['Authorization'] = $auth; // Redirects are followed by hand; re-checked per hop.
 		}
 
 		$request_args = array(
@@ -934,9 +934,24 @@ class BLT_Optimized_Page_Auditor {
 	 * same way, so the loopback needs them too. Only ever sent to this site's
 	 * own host (redirects are followed manually and validated).
 	 *
+	 * Credentials only ever go to the site's own front door: the exact scheme,
+	 * host and port of home_url(). Never to the content/CDN host (which also
+	 * counts as "local" for analysis), and never downgraded from https to http.
+	 *
+	 * @param string $url URL the request is about to be sent to.
 	 * @return string "Basic …" header value or ''.
 	 */
-	private function auth_header() {
+	private function auth_header( $url ) {
+		$home   = wp_parse_url( home_url() );
+		$target = wp_parse_url( (string) $url );
+		if ( ! is_array( $home ) || ! is_array( $target )
+			|| strtolower( isset( $target['scheme'] ) ? $target['scheme'] : '' ) !== strtolower( isset( $home['scheme'] ) ? $home['scheme'] : '' )
+			|| strtolower( isset( $target['host'] ) ? $target['host'] : '' ) !== strtolower( isset( $home['host'] ) ? $home['host'] : '' )
+			|| ( isset( $target['port'] ) ? (int) $target['port'] : 0 ) !== ( isset( $home['port'] ) ? (int) $home['port'] : 0 )
+		) {
+			return '';
+		}
+
 		/**
 		 * Whether to forward the admin request's HTTP basic-auth credentials to
 		 * the loopback requests.

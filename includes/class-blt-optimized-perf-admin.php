@@ -920,24 +920,34 @@ class BLT_Optimized_Perf_Admin {
 		$out = fopen( 'php://output', 'w' ); // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_fopen
 		fputcsv( $out, array( 'severity', 'category', 'title', 'impact', 'component', 'where', 'summary', 'fix', 'dismissed', 'id' ) );
 		foreach ( $report ? (array) $report['findings'] : array() as $finding ) {
-			fputcsv(
-				$out,
-				array(
-					$finding['severity'],
-					$finding['category'],
-					$finding['title'],
-					$finding['impact']['label'],
-					$finding['component'] ? BLT_Optimized_Components::label( $finding['component'] ) : '',
-					implode( ' | ', array_slice( (array) $finding['where'], 0, 10 ) ),
-					$finding['summary'],
-					is_array( $finding['fix'] ) ? $finding['fix']['label'] : '',
-					isset( $dismissed[ $finding['key'] ] ) ? 'yes' : '',
-					$finding['id'],
-				)
+			$row = array(
+				$finding['severity'],
+				$finding['category'],
+				$finding['title'],
+				$finding['impact']['label'],
+				$finding['component'] ? BLT_Optimized_Components::label( $finding['component'] ) : '',
+				implode( ' | ', array_slice( (array) $finding['where'], 0, 10 ) ),
+				$finding['summary'],
+				is_array( $finding['fix'] ) ? $finding['fix']['label'] : '',
+				isset( $dismissed[ $finding['key'] ] ) ? 'yes' : '',
+				$finding['id'],
 			);
+			fputcsv( $out, array_map( array( $this, 'csv_cell' ), $row ) );
 		}
 		fclose( $out ); // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_fclose
 		exit;
+	}
+
+	/**
+	 * Neutralise spreadsheet formulas: a cell starting with = + - @ (or a
+	 * tab/CR) is prefixed with a quote so Excel/Sheets show it as text.
+	 *
+	 * @param mixed $value Cell value.
+	 * @return string
+	 */
+	private function csv_cell( $value ) {
+		$value = (string) $value;
+		return ( '' !== $value && false !== strpos( "=+-@\t\r", $value[0] ) ) ? "'" . $value : $value;
 	}
 
 	/* ------------------------------------------------------------------ */

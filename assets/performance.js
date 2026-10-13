@@ -134,7 +134,7 @@
 		if ( /[\u0000-\u001f]/.test( url ) ) {
 			return '';
 		}
-		return /^(https?:\/\/|\/(?!\/)|[a-z0-9_-]+\.php(\?|$))/i.test( url ) ? url : '';
+		return /^(https?:\/\/|\/(?![\/\\])|[a-z0-9_-]+\.php(\?|$))/i.test( url ) ? url : '';
 	}
 
 	function link( url, label, newTab ) {
@@ -1361,10 +1361,10 @@
 						}
 					} );
 
+					// A ?url= link only pre-fills the field: profiling makes the
+					// server request that URL, so it waits for a click.
 					if ( stored ) {
 						profiler.loadStored( stored.key );
-					} else if ( requested ) {
-						profiler.run();
 					} else {
 						$( '#blt-profiler-result' ).html( '<div class="blt-card"><div class="blt-card-body">' +
 							emptyState( t( 'profilerEmptyTitle' ), t( 'profilerEmpty' ) ) + '</div></div>' );

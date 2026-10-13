@@ -41,6 +41,7 @@ defined( 'ABSPATH' ) || exit;
 			</div>
 			<div class="blt-progress"><div class="blt-progress-fill" id="blt-perf-bar"></div></div>
 			<ol class="blt-perf-steps" id="blt-perf-steps"></ol>
+			<div class="blt-lab-panel" id="blt-perf-lab-stage" hidden></div>
 			<button type="button" class="button" id="blt-perf-resume" hidden><?php esc_html_e( 'Resume scan', 'blt-optimized' ); ?></button>
 		</div>
 	</div>

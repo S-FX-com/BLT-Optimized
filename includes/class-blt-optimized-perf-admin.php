@@ -488,6 +488,186 @@ class BLT_Optimized_Perf_Admin {
 						'noChangesHint'            => __( 'When you stop an option autoloading from a Performance Scan fix, it is listed here so you can undo it.', 'blt-optimized' ),
 						'restoreAutoload'          => __( 'Restore autoload', 'blt-optimized' ),
 						'confirmRestore'           => __( 'Make this option load on every request again?', 'blt-optimized' ),
+						// Lab test (built-in, measured in this browser).
+						'step_lab'                 => __( 'Lab test', 'blt-optimized' ),
+						'tab_lab'                  => __( 'Lab (Core Web Vitals)', 'blt-optimized' ),
+						'labResultsTitle'          => __( 'Lab results (measured in your browser)', 'blt-optimized' ),
+						/* translators: %s: "N pages". */
+						'labResultsHint'           => __( 'Median of %s on a mobile viewport, measured in this browser without throttling. Open a page in the Page Profiler for the full breakdown.', 'blt-optimized' ),
+						/* translators: %s: number of pages. */
+						'labPageOne'               => __( '%s page', 'blt-optimized' ),
+						/* translators: %s: number of pages. */
+						'labPageMany'              => __( '%s pages', 'blt-optimized' ),
+						'labTableNote'             => __( 'LCP, CLS and TBT were measured in this browser on a mobile viewport, without throttling.', 'blt-optimized' ),
+						'labColMobile'             => __( 'Mobile viewport', 'blt-optimized' ),
+						'labBlockedShort'          => __( 'Blocked', 'blt-optimized' ),
+						'labCaveat'                => __( 'Measured in your own browser with no CPU or network throttling, so numbers are usually better than PageSpeed Insights’ simulated mid-range phone on 4G. Interaction to Next Paint needs real clicks, so Total Blocking Time stands in for it. Unused JavaScript is not measured; main-thread time per script is shown instead. Images may come from your browser cache on repeat runs.', 'blt-optimized' ),
+						// Lab test: running it.
+						/* translators: %s: device name (Mobile or Desktop). */
+						'labMeasuring'             => __( 'Measuring %s', 'blt-optimized' ),
+						/* translators: 1: current step, 2: number of steps. */
+						'labStepOf'                => __( '(%1$d of %2$d)', 'blt-optimized' ),
+						/* translators: 1: page number, 2: number of pages. */
+						'labScanPage'              => __( 'Measuring page %1$d of %2$d in your browser…', 'blt-optimized' ),
+						/* translators: 1: page, 2: error message. */
+						'labScanSkipped'           => __( 'The lab test was skipped for %1$s: %2$s', 'blt-optimized' ),
+						/* translators: %s: error message. */
+						'labFailed'                => __( 'The lab test failed: %s', 'blt-optimized' ),
+						/* translators: 1: frame width, 2: frame height. */
+						'labFrameNote'             => __( 'The page runs live in a %1$d × %2$d px frame, scaled down to fit. Keep this tab in front and the frame in view until it finishes.', 'blt-optimized' ),
+						/* translators: %s: page URL. */
+						'labFrameTitle'            => __( 'Lab test of %s', 'blt-optimized' ),
+						'labPhase_token'           => __( 'Preparing the test…', 'blt-optimized' ),
+						'labPhase_loading'         => __( 'Loading the page…', 'blt-optimized' ),
+						'labPhase_settling'        => __( 'Waiting for the page to settle…', 'blt-optimized' ),
+						'labPhase_collecting'      => __( 'Collecting measurements…', 'blt-optimized' ),
+						'labPhase_saving'          => __( 'Saving the result…', 'blt-optimized' ),
+						'labPhase_hidden'          => __( 'Paused: bring this browser tab back to the front to continue.', 'blt-optimized' ),
+						'labPhase_retry'           => __( 'The first attempt was unreliable (tab in the background or frame out of view): starting over…', 'blt-optimized' ),
+						// Lab test: results.
+						'labCouldNotRun'           => __( 'The lab test could not run on this page', 'blt-optimized' ),
+						'labWarn_hidden_tab'       => __( 'This browser tab was in the background during the test, so the browser may not have painted the page normally. Run the test again and keep this tab in front.', 'blt-optimized' ),
+						'labWarn_framed_blocked'   => __( 'This page cannot be shown in a frame. A security header sent by the web server (X-Frame-Options, or a Content-Security-Policy frame-ancestors rule) forbids it and WordPress cannot override it. Ask your host to allow framing from this site, or check the page with PageSpeed Insights.', 'blt-optimized' ),
+						'labWarn_no_observer'      => __( 'The measuring script did not run on this page. It may not be a WordPress page, or a Content-Security-Policy header blocks inline scripts.', 'blt-optimized' ),
+						'labWarn_timeout'          => __( 'The page was still loading or busy when the test stopped waiting (20 seconds after load, 30 overall), so late activity may be missing.', 'blt-optimized' ),
+						'labWarn_no_lcp'           => __( 'The browser reported no Largest Contentful Paint. It may not support it, or the page was not in view while it painted.', 'blt-optimized' ),
+						'labWarn_no_loaf'          => __( 'This browser does not report long animation frames (Chrome and Edge 123 or later do), so main-thread time per script is unavailable.', 'blt-optimized' ),
+						'labWarn_no_longtask'      => __( 'This browser does not report long tasks, so Total Blocking Time could not be measured.', 'blt-optimized' ),
+						'labWarn_css_truncated'    => __( 'This page has so much CSS that the unused-CSS check stopped after 0.8 seconds; the figures cover only part of it.', 'blt-optimized' ),
+						'labEmptyTitle'            => __( 'No lab test for this page yet', 'blt-optimized' ),
+						'labEmptyHint'             => __( 'Pick Mobile, Desktop or Both next to “Run lab test” above to measure Core Web Vitals in your own browser.', 'blt-optimized' ),
+						'labOnlyTitle'             => __( 'Lab test only', 'blt-optimized' ),
+						'labOnlyHint'              => __( 'Only the lab test has run for this page. Click “Profile page” to add the server-side breakdown: plugins, database queries and outbound HTTP calls.', 'blt-optimized' ),
+						/* translators: %s: date and time. */
+						'labMeasuredAt'            => __( 'Measured %s', 'blt-optimized' ),
+						'labDevice'                => __( 'Device', 'blt-optimized' ),
+						'labLcpElement'            => __( 'Largest Contentful Paint element', 'blt-optimized' ),
+						'labNoLcp'                 => __( 'The browser reported no Largest Contentful Paint element for this page.', 'blt-optimized' ),
+						'labFactElement'           => __( 'Element', 'blt-optimized' ),
+						'labFactType'              => __( 'Type', 'blt-optimized' ),
+						'labFactRendered'          => __( 'Painted at', 'blt-optimized' ),
+						'labFactImage'             => __( 'Image', 'blt-optimized' ),
+						'labFactSize'              => __( 'Image size', 'blt-optimized' ),
+						'labFactAttrs'             => __( 'Loading hints', 'blt-optimized' ),
+						'labFactText'              => __( 'Text', 'blt-optimized' ),
+						'labKindImage'             => __( 'Image', 'blt-optimized' ),
+						'labKindBackground'        => __( 'CSS background image', 'blt-optimized' ),
+						'labKindText'              => __( 'Text', 'blt-optimized' ),
+						/* translators: %s: number of pixels. */
+						'labPixels'                => __( '%s px²', 'blt-optimized' ),
+						'labCached'                => __( 'from cache', 'blt-optimized' ),
+						/* translators: 1: file size in pixels, 2: displayed size, 3: size needed, 4: device pixel ratio. */
+						'labSizeCompare'           => __( '%1$s px file, shown at %2$s px (about %3$s px needed at a pixel ratio of %4$s)', 'blt-optimized' ),
+						'labBreakdown'             => __( 'Where the LCP time went', 'blt-optimized' ),
+						/* translators: %s: time. */
+						'labBreakdownLabel'        => __( 'Largest Contentful Paint breakdown, %s in total', 'blt-optimized' ),
+						'labPartTtfb'              => __( 'Server response', 'blt-optimized' ),
+						'labPartDelay'             => __( 'Finding the image', 'blt-optimized' ),
+						'labPartLoad'              => __( 'Downloading the image', 'blt-optimized' ),
+						'labPartRender'            => __( 'Rendering', 'blt-optimized' ),
+						'labPartRenderText'        => __( 'Rendering the text', 'blt-optimized' ),
+						'labCauses'                => __( 'Likely causes', 'blt-optimized' ),
+						/* translators: %s: time. */
+						'labCauseTtfb'             => __( 'The server took %s to answer, which delays everything after it.', 'blt-optimized' ),
+						'labCauseLazy'             => __( 'The LCP image is lazy-loaded (loading="lazy"), which delays the most important image on the page. Remove lazy loading from it.', 'blt-optimized' ),
+						'labCausePriority'         => __( 'The LCP image has no fetchpriority="high", so the browser may fetch it after less important files.', 'blt-optimized' ),
+						'labCauseBackground'       => __( 'The LCP image is a CSS background image, so the browser only finds it after the stylesheet has loaded. An img tag, or a preload, lets it start earlier.', 'blt-optimized' ),
+						/* translators: 1: natural image size, 2: size needed. */
+						'labCauseOversized'        => __( 'The image file is %1$s pixels but only about %2$s are needed at the size it is shown.', 'blt-optimized' ),
+						/* translators: %s: time. */
+						'labCauseLate'             => __( 'The image request only started %s after the first byte, so the browser found it late.', 'blt-optimized' ),
+						/* translators: %s: number of resources. */
+						'labCauseBlocking'         => __( '%s render-blocking resources finished before the LCP element could be painted.', 'blt-optimized' ),
+						/* translators: %s: Bricks element label. */
+						'labBricksElement'         => __( 'Bricks element %s', 'blt-optimized' ),
+						/* translators: %s: template or page title. */
+						'labBricksIn'              => __( 'in “%s”', 'blt-optimized' ),
+						'labEditBricks'            => __( 'Edit in Bricks', 'blt-optimized' ),
+						'labShifts'                => __( 'Layout shifts', 'blt-optimized' ),
+						/* translators: %s: Cumulative Layout Shift value. */
+						'labShiftsHint'            => __( 'Elements that moved after they were first painted. Cumulative Layout Shift is %s (the worst burst of shifts).', 'blt-optimized' ),
+						'labNoShifts'              => __( 'No layout shifts were recorded.', 'blt-optimized' ),
+						'labColShift'              => __( 'Shift', 'blt-optimized' ),
+						'labColElement'            => __( 'Element', 'blt-optimized' ),
+						'labColMoved'              => __( 'Moved', 'blt-optimized' ),
+						'labRemovedNode'           => __( 'An element that has since been removed', 'blt-optimized' ),
+						'labBlocking'              => __( 'Render-blocking resources', 'blt-optimized' ),
+						'labBlockingTile'          => __( 'Render-blocking', 'blt-optimized' ),
+						/* translators: 1: number of resources, 2: time. */
+						'labBlockingHint'          => __( '%1$s resources held back the first paint; the last one finished at %2$s.', 'blt-optimized' ),
+						'labNoBlocking'            => __( 'Nothing blocked rendering.', 'blt-optimized' ),
+						'labColWindow'             => __( 'Loaded between', 'blt-optimized' ),
+						'labUnusedCss'             => __( 'Unused CSS', 'blt-optimized' ),
+						'labUnusedTile'            => __( 'Unused CSS', 'blt-optimized' ),
+						'labUnusedSub'             => __( 'styles nothing here', 'blt-optimized' ),
+						/* translators: 1: unused size, 2: percent unused, 3: total CSS size. */
+						'labUnusedHint'            => __( '%1$s of %3$s of CSS (%2$d%%) styles nothing on this page at first load. Rules for other screen sizes and for hover or focus states are not counted.', 'blt-optimized' ),
+						'labNoCss'                 => __( 'No stylesheets were found.', 'blt-optimized' ),
+						'labByStylesheet'          => __( 'By stylesheet', 'blt-optimized' ),
+						'labColStylesheet'         => __( 'Stylesheet', 'blt-optimized' ),
+						'labColSheets'             => __( 'Stylesheets', 'blt-optimized' ),
+						'labColUnused'             => __( 'Unused', 'blt-optimized' ),
+						'labColRules'              => __( 'Unused rules', 'blt-optimized' ),
+						'labInlineStyle'           => __( 'Inline style', 'blt-optimized' ),
+						'labCrossOrigin'           => __( 'From another site: its rules can’t be inspected', 'blt-optimized' ),
+						/* translators: %s: number of CSS rules. */
+						'labOtherMediaOne'         => __( '%s rule for another screen size is not counted as unused', 'blt-optimized' ),
+						/* translators: %s: number of CSS rules. */
+						'labOtherMediaMany'        => __( '%s rules for other screen sizes are not counted as unused', 'blt-optimized' ),
+						'labNoAttrs'               => __( 'none set', 'blt-optimized' ),
+						/* translators: %s: number of stylesheets. */
+						'labMoreSheets'            => __( '%s more stylesheets are not shown.', 'blt-optimized' ),
+						'labMainThread'            => __( 'Main-thread time', 'blt-optimized' ),
+						'labLongTasks'             => __( 'Long tasks', 'blt-optimized' ),
+						/* translators: %s: time. */
+						'labLongest'               => __( 'longest %s', 'blt-optimized' ),
+						'labFrames'                => __( 'Slow frames', 'blt-optimized' ),
+						/* translators: %s: time. */
+						'labFramesBlocking'        => __( '%s blocking in total', 'blt-optimized' ),
+						'labNoScriptTime'          => __( 'No script ran long enough to be recorded: nothing blocked the main thread for more than 50 ms.', 'blt-optimized' ),
+						'labScriptTimeHint'        => __( 'Script time inside slow animation frames (over 50 ms), grouped by the plugin or theme that owns the file.', 'blt-optimized' ),
+						'labColScriptTime'         => __( 'Script time', 'blt-optimized' ),
+						'labColForced'             => __( 'Forced layout', 'blt-optimized' ),
+						'labColCalls'              => __( 'Calls', 'blt-optimized' ),
+						'labByScript'              => __( 'Busiest scripts', 'blt-optimized' ),
+						'labColScript'             => __( 'Script', 'blt-optimized' ),
+						'labColTrigger'            => __( 'Started by', 'blt-optimized' ),
+						'labLongTaskList'          => __( 'Longest tasks', 'blt-optimized' ),
+						'labColStart'              => __( 'Start', 'blt-optimized' ),
+						'labColBlocking'           => __( 'Blocking', 'blt-optimized' ),
+						'labInline'                => __( 'Inline script', 'blt-optimized' ),
+						'labCore'                  => __( 'WordPress core', 'blt-optimized' ),
+						'labSite'                  => __( 'This site', 'blt-optimized' ),
+						'labImages'                => __( 'Images', 'blt-optimized' ),
+						'labImagesHint'            => __( 'Images that are much larger than they are shown, that load before they are needed, or that are lazy-loaded where visitors look first.', 'blt-optimized' ),
+						'labImagesOk'              => __( 'No oversized, offscreen or wrongly lazy-loaded images found.', 'blt-optimized' ),
+						'labColShownAt'            => __( 'Shown at', 'blt-optimized' ),
+						/* translators: %s: wasted size, e.g. "120 KB". */
+						'labFlagOversized'         => __( 'Oversized, about %s wasted', 'blt-optimized' ),
+						'labFlagOffscreen'         => __( 'Offscreen, loaded early', 'blt-optimized' ),
+						'labFlagLazyAbove'         => __( 'Lazy-loaded above the fold', 'blt-optimized' ),
+						'labResources'             => __( 'Requests', 'blt-optimized' ),
+						'labNoResources'           => __( 'No requests were recorded.', 'blt-optimized' ),
+						'labWeight'                => __( 'Page weight', 'blt-optimized' ),
+						'labFonts'                 => __( 'Fonts', 'blt-optimized' ),
+						/* translators: %s: number of requests. */
+						'labRequestOne'            => __( '%s request', 'blt-optimized' ),
+						/* translators: %s: number of requests. */
+						'labRequestMany'           => __( '%s requests', 'blt-optimized' ),
+						'labByComponent'           => __( 'By plugin and theme', 'blt-optimized' ),
+						'labColTransferred'        => __( 'Transferred', 'blt-optimized' ),
+						'labColKinds'              => __( 'Made up of', 'blt-optimized' ),
+						'labKind_js'               => __( 'JS', 'blt-optimized' ),
+						'labKind_css'              => __( 'CSS', 'blt-optimized' ),
+						'labKind_img'              => __( 'Images', 'blt-optimized' ),
+						'labKind_font'             => __( 'Fonts', 'blt-optimized' ),
+						'labKind_other'            => __( 'Other', 'blt-optimized' ),
+						'labWaterfall'             => __( 'Request waterfall', 'blt-optimized' ),
+						'labWaterfallHint'         => __( 'The 40 slowest or largest requests on one time axis, with first paint, largest paint and load marked.', 'blt-optimized' ),
+						'labLegendNormal'          => __( 'Request', 'blt-optimized' ),
+						'labLegendBlocking'        => __( 'Render-blocking', 'blt-optimized' ),
+						'labLegendCached'          => __( 'From cache', 'blt-optimized' ),
+						'labMarkLoad'              => __( 'Load', 'blt-optimized' ),
 				),
 			)
 		);

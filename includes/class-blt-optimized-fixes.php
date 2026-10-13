@@ -67,40 +67,44 @@ class BLT_Optimized_Fixes {
 	 */
 	public static function actions() {
 		return array(
-			'tweak'                  => array(
+			'tweak'                   => array(
 				'label'       => __( 'Change a speed tweak', 'blt-optimized' ),
 				'destructive' => false,
 			),
-			'asset_rule'             => array(
+			'asset_rule'              => array(
 				'label'       => __( 'Add an asset rule', 'blt-optimized' ),
 				'destructive' => false,
 			),
-			'disable_autoload'       => array(
+			'disable_autoload'        => array(
 				'label'       => __( 'Stop autoloading an option', 'blt-optimized' ),
 				'destructive' => false,
 			),
-			'restore_autoload'       => array(
+			'restore_autoload'        => array(
 				'label'       => __( 'Restore autoloading for an option', 'blt-optimized' ),
 				'destructive' => false,
 			),
-			'delete_cron_hook'       => array(
+			'delete_cron_hook'        => array(
 				'label'       => __( 'Delete orphaned scheduled events', 'blt-optimized' ),
 				'destructive' => true,
 			),
-			'cleanup'                => array(
+			'cleanup'                 => array(
 				'label'       => __( 'Run a database cleanup', 'blt-optimized' ),
 				'destructive' => true,
 			),
-			'delete_orphan_files'    => array(
+			'delete_orphan_files'     => array(
 				'label'       => __( 'Delete orphaned upload files', 'blt-optimized' ),
 				'destructive' => true,
 			),
-			'delete_stale_sizes'     => array(
+			'delete_stale_sizes'      => array(
 				'label'       => __( 'Delete unused image sizes', 'blt-optimized' ),
 				'destructive' => true,
 			),
-			'delete_original_images' => array(
+			'delete_original_images'  => array(
 				'label'       => __( 'Delete pre-scaled original images', 'blt-optimized' ),
+				'destructive' => true,
+			),
+			'bricks_delete_css_files' => array(
+				'label'       => __( 'Delete orphaned Bricks CSS files', 'blt-optimized' ),
 				'destructive' => true,
 			),
 		);
@@ -913,6 +917,70 @@ class BLT_Optimized_Fixes {
 		}
 
 		return $this->run_media( 'delete_originals', array_values( $clean ) );
+	}
+
+	/* ------------------------------------------------------------------ */
+	/* Bricks                                                              */
+	/* ------------------------------------------------------------------ */
+
+	/**
+	 * Delete orphaned Bricks CSS files (`uploads/bricks/css/post-{ID}.min.css`
+	 * whose post is gone or no longer uses Bricks). The Bricks module checks every
+	 * name against the list the last scan stored, resolves it inside the Bricks CSS
+	 * folder and re-checks the post right before deleting; this only checks the
+	 * argument shape.
+	 *
+	 * @param array $args { files: string[] }.
+	 * @return array|WP_Error
+	 */
+	private function fix_bricks_delete_css_files( array $args ) {
+		$files = isset( $args['files'] ) ? $args['files'] : null;
+		if ( ! is_array( $files ) || empty( $files ) || count( $files ) > self::MAX_MEDIA_ITEMS ) {
+			return $this->invalid( __( 'Provide between 1 and 500 CSS file names.', 'blt-optimized' ) );
+		}
+
+		$clean = array();
+		foreach ( $files as $file ) {
+			if ( ! is_string( $file ) || '' === $file || strlen( $file ) > 100 || preg_match( '/[\x00-\x1F\x7F]/', $file ) ) {
+				return $this->invalid( __( 'Every file must be a plain CSS file name.', 'blt-optimized' ) );
+			}
+			$clean[ $file ] = $file;
+		}
+
+		if ( ! class_exists( 'BLT_Optimized_Bricks' ) ) {
+			return $this->unavailable();
+		}
+
+		$bricks = new BLT_Optimized_Bricks( isset( $this->plugin->audit_log ) ? $this->plugin->audit_log : null );
+		$result = $bricks->delete_css_files( array_values( $clean ) );
+		if ( is_wp_error( $result ) ) {
+			return $result;
+		}
+
+		$count   = (int) $result['files'];
+		$bytes   = (int) $result['bytes'];
+		$skipped = (int) $result['skipped'];
+
+		$message = sprintf(
+			/* translators: 1: number of files, 2: human-readable size. */
+			_n( 'Deleted %1$s orphaned Bricks CSS file, freeing %2$s.', 'Deleted %1$s orphaned Bricks CSS files, freeing %2$s.', $count, 'blt-optimized' ),
+			number_format_i18n( $count ),
+			size_format( $bytes )
+		);
+		if ( $skipped > 0 ) {
+			$message .= ' ' . sprintf(
+				/* translators: %s: number of items. */
+				_n( '%s file was skipped because it changed or is now in use.', '%s files were skipped because they changed or are now in use.', $skipped, 'blt-optimized' ),
+				number_format_i18n( $skipped )
+			);
+		}
+
+		return array(
+			'message' => $message,
+			'changed' => $count > 0,
+			'rows'    => $count,
+			'bytes'   => $bytes,
+		);
 	}
 
 	/**

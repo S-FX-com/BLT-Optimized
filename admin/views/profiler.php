@@ -57,6 +57,15 @@ $blt_psi_on   = ! empty( $blt_settings['enable_psi'] );
 			</div>
 			<div class="blt-profiler-actions">
 				<button type="button" class="button button-primary" id="blt-profiler-run"><?php esc_html_e( 'Profile page', 'blt-optimized' ); ?></button>
+				<span class="blt-profiler-lab">
+					<span class="blt-profiler-lab-label" id="blt-lab-label"><?php esc_html_e( 'Lab test', 'blt-optimized' ); ?></span>
+					<select id="blt-lab-device" aria-labelledby="blt-lab-label">
+						<option value="mobile"><?php esc_html_e( 'Mobile', 'blt-optimized' ); ?></option>
+						<option value="desktop"><?php esc_html_e( 'Desktop', 'blt-optimized' ); ?></option>
+						<option value="both"><?php esc_html_e( 'Both', 'blt-optimized' ); ?></option>
+					</select>
+					<button type="button" class="button" id="blt-profiler-lab-run"><?php esc_html_e( 'Run lab test', 'blt-optimized' ); ?></button>
+				</span>
 				<?php if ( $blt_psi_on ) : ?>
 					<span class="blt-profiler-psi">
 						<label class="screen-reader-text" for="blt-profiler-strategy"><?php esc_html_e( 'PageSpeed Insights device', 'blt-optimized' ); ?></label>
@@ -71,16 +80,19 @@ $blt_psi_on   = ! empty( $blt_settings['enable_psi'] );
 						<?php
 						printf(
 							/* translators: %s: link to the settings screen. */
-							esc_html__( 'Want Lighthouse lab data (LCP, CLS, TBT)? Turn on PageSpeed Insights in %s.', 'blt-optimized' ),
+							esc_html__( 'Optional: compare with Google PageSpeed Insights by turning it on in %s.', 'blt-optimized' ),
 							'<a href="' . esc_url( admin_url( 'admin.php?page=blt-optimized-settings' ) ) . '">' . esc_html__( 'Settings', 'blt-optimized' ) . '</a>'
 						);
 						?>
 					</span>
 				<?php endif; ?>
 			</div>
+			<p class="blt-field-desc blt-profiler-lab-hint"><?php esc_html_e( 'The lab test loads the page in a frame on this screen and measures Largest Contentful Paint, layout shifts and blocking time with your browser’s own performance tools. It needs no account, API key or public website. Keep this tab in front while it runs.', 'blt-optimized' ); ?></p>
 			<div id="blt-profiler-status" class="blt-profiler-status" aria-live="polite"></div>
 		</div>
 	</div>
+
+	<div class="blt-card blt-lab-panel" id="blt-profiler-lab-stage" hidden></div>
 
 	<div id="blt-profiler-psi-result"></div>
 

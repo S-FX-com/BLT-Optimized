@@ -45,6 +45,22 @@ spl_autoload_register(
 );
 
 /**
+ * Bricks Builder support (Bricks parent theme only).
+ *
+ * The slug is read from the `template` option, which is available here; the
+ * BRICKS_VERSION constant is not defined until the theme loads. The callbacks
+ * are plain class/method names, so BLT_Optimized_Bricks is only loaded when a
+ * hook fires (a scan being compiled, or a "content contains" asset rule being
+ * evaluated) and never on other requests, nor on sites without Bricks.
+ */
+if ( 'bricks' === get_template() ) {
+	add_filter( 'blt_optimized_perf_findings', array( 'BLT_Optimized_Bricks', 'filter_findings' ), 10, 2 );
+	add_filter( 'blt_optimized_asset_markers', array( 'BLT_Optimized_Bricks', 'filter_asset_markers' ) );
+	add_filter( 'blt_optimized_rule_meta_keys', array( 'BLT_Optimized_Bricks', 'filter_rule_meta_keys' ) );
+	add_filter( 'blt_optimized_rule_haystack', array( 'BLT_Optimized_Bricks', 'filter_rule_haystack' ), 10, 2 );
+}
+
+/**
  * Front-end profiler gate.
  *
  * Started before anything else so a profiled request's timing and plugin-load

@@ -4,7 +4,9 @@
  *
  * Modules (same shape as admin.js): util (escaping + formatters), findings
  * (the one finding-row renderer the scan and the profiler share), psi
- * (PageSpeed Insights block), scan, profiler, tweaks.
+ * (PageSpeed Insights block), labRunner (the built-in lab test: runs a page in a
+ * visible device frame and reads the browser's own performance APIs) with
+ * labui (its results view), scan, profiler, tweaks.
  *
  * Everything inserted into the DOM goes through escapeHtml(); URLs only reach
  * an href after safeUrl() has accepted them.
@@ -250,7 +252,7 @@
 		} );
 		headers.forEach( function ( header ) {
 			// An icon/action column still needs a name for screen readers.
-			html += '<th scope="col"' + ( header.cls ? ' class="' + header.cls + '"' : '' ) + '>' +
+			html += '<th scope="col"' + ( header.cls ? ' class="' + header.cls + '"' : '' ) + ( header.title ? ' title="' + escapeHtml( header.title ) + '"' : '' ) + '>' +
 				( header.label ? escapeHtml( header.label ) : '<span class="screen-reader-text">' + escapeHtml( header.sr || t( 'colActions' ) ) + '</span>' ) + '</th>';
 		} );
 		html += '</tr></thead><tbody>';
@@ -745,11 +747,1295 @@
 	};
 
 	/* ------------------------------------------------------------------ */
+	/* Lab test: the built-in measurement, run in a visible device frame   */
+	/* ------------------------------------------------------------------ */
+
+	// The frame's own width/height are the page's layout viewport, so these
+	// match PageSpeed's mobile emulation and a common laptop window.
+	var LAB_VIEWPORTS = {
+		mobile: { w: 412, h: 823 },
+		desktop: { w: 1350, h: 940 }
+	};
+	var LAB_QUIET_MS = 2000; // no resource, long task, LCP or layout shift for this long = settled
+	var LAB_POLL_MS = 250;
+	var LAB_LOAD_CAP = 20000; // give up waiting for quiet this long after load
+	var LAB_TOTAL_CAP = 30000; // and this long after starting
+
+	// [ good up to, needs improvement up to ]; anything above is poor.
+	var LAB_THRESHOLDS = {
+		lcp: [ 2500, 4000 ],
+		cls: [ 0.1, 0.25 ],
+		tbt: [ 200, 600 ],
+		fcp: [ 1800, 3000 ],
+		ttfb: [ 800, 1800 ]
+	};
+	var LAB_RATING_CLASS = { good: 'is-good', 'needs-improvement': 'is-warn', poor: 'is-bad' };
+	var LAB_METRICS = [ 'lcp', 'cls', 'tbt', 'fcp', 'ttfb' ];
+
+	function labRate( metric, value ) {
+		if ( ! isNumber( value ) || ! LAB_THRESHOLDS[ metric ] ) {
+			return '';
+		}
+		value = Number( value );
+		return value <= LAB_THRESHOLDS[ metric ][ 0 ] ? 'good' : ( value <= LAB_THRESHOLDS[ metric ][ 1 ] ? 'needs-improvement' : 'poor' );
+	}
+
+	function labValue( metric, value ) {
+		if ( ! isNumber( value ) ) {
+			return DASH;
+		}
+		if ( 'cls' === metric ) {
+			value = Number( value );
+			return value > 0 && value < 0.001 ? '<0.001' : String( Math.round( value * 1000 ) / 1000 );
+		}
+		return ms( value );
+	}
+
+	function labVerdict( rating ) {
+		return { good: t( 'psiGood' ), 'needs-improvement': t( 'psiMid' ), poor: t( 'psiPoor' ) }[ rating ] || '';
+	}
+
+	function labPick( first, second ) {
+		return isNumber( first ) ? Number( first ) : ( isNumber( second ) ? Number( second ) : null );
+	}
+
+	function median( values ) {
+		values = values.filter( isNumber ).map( Number ).sort( function ( a, b ) {
+			return a - b;
+		} );
+		if ( ! values.length ) {
+			return null;
+		}
+		var mid = Math.floor( values.length / 2 );
+		return values.length % 2 ? values[ mid ] : ( values[ mid - 1 ] + values[ mid ] ) / 2;
+	}
+
+	// A coloured value for tables: the colour carries the rating, the hidden
+	// text says it for everyone who can't see the colour.
+	function labValueHtml( metric, value, rating ) {
+		if ( ! isNumber( value ) ) {
+			return escapeHtml( DASH );
+		}
+		rating = rating || labRate( metric, value );
+		return '<span class="blt-lab-val ' + ( LAB_RATING_CLASS[ rating ] || '' ) + '">' + escapeHtml( labValue( metric, value ) ) +
+			( rating ? '<span class="screen-reader-text"> (' + escapeHtml( labVerdict( rating ) ) + ')</span>' : '' ) + '</span>';
+	}
+
+	var labRunner = {
+		uid: 0,
+
+		/**
+		 * Measure one page in one viewport.
+		 *
+		 * opts: { url, viewport: mobile|desktop, scan: bool, $mount, title, step, steps, onPhase(key, text) }
+		 * Returns { promise, abort }. The promise resolves with { viewport, data, payload } where data is
+		 * the perf_lab_store response ({ lab, summary, findings }) and is rejected with { message } or
+		 * { aborted: true }.
+		 *
+		 * Flow: token -> visible frame -> load -> poll __bltLab.state() until quiet -> collect() ->
+		 * store. A hidden admin tab or a frame scrolled out of view makes the run unreliable (the browser
+		 * stops painting, so no LCP): it is discarded and repeated once.
+		 */
+		run: function ( opts ) {
+			var viewport = LAB_VIEWPORTS[ opts.viewport ] ? opts.viewport : 'mobile';
+			var size = LAB_VIEWPORTS[ viewport ];
+			var ns = '.bltLab' + ( ++labRunner.uid );
+			var deferred = $.Deferred();
+			var run = { aborted: false, retries: 0, frame: null, timer: 0, started: 0, loadedAt: 0, loaded: false, hiddenSeen: false, offscreen: false, lastScroll: 0, $phase: null, loafWatch: null, loafEntries: [] };
+
+			function phase( key ) {
+				var text = t( 'labPhase_' + key );
+				if ( run.$phase ) {
+					run.$phase.text( text );
+				}
+				if ( opts.onPhase ) {
+					opts.onPhase( key, text );
+				}
+			}
+
+			function teardown() {
+					window.clearTimeout( run.timer );
+					if ( run.loafWatch ) {
+						try {
+							run.loafWatch.disconnect();
+						} catch ( e ) {}
+						run.loafWatch = null;
+					}
+				$( window ).off( ns );
+				$( document ).off( ns );
+				if ( run.frame ) {
+					try {
+						run.frame.src = 'about:blank';
+					} catch ( e ) {}
+					$( run.frame ).remove();
+					run.frame = null;
+				}
+			}
+
+			function fail( message ) {
+				teardown();
+				deferred.reject( { message: message || t( 'error' ) } );
+			}
+
+			// The whole scaled frame has to be in the admin window, or the browser skips painting it.
+			function onScreen() {
+				var rect = run.frame.getBoundingClientRect();
+				var vw = window.innerWidth || document.documentElement.clientWidth;
+				var vh = window.innerHeight || document.documentElement.clientHeight;
+				var w = Math.max( 0, Math.min( rect.right, vw ) - Math.max( rect.left, 0 ) );
+				var h = Math.max( 0, Math.min( rect.bottom, vh ) - Math.max( rect.top, 0 ) );
+				return rect.width > 0 && rect.height > 0 && w * h >= 0.9 * Math.min( rect.width, vw ) * Math.min( rect.height, vh );
+			}
+
+			function bringIntoView() {
+				if ( run.frame && run.frame.scrollIntoView && Date.now() - run.lastScroll > 1000 ) {
+					run.lastScroll = Date.now();
+					try {
+						run.frame.scrollIntoView( { block: 'nearest', inline: 'nearest' } );
+					} catch ( e ) {}
+				}
+			}
+
+			// What the framed page exposes: the observer, nothing, or a refusal to be framed.
+			function inspect() {
+				var win;
+				try {
+					win = run.frame.contentWindow;
+					// Throws for a cross-origin document: the browser's own "refused to connect" page.
+					if ( ! win || 'string' !== typeof win.location.href ) {
+						return { blocked: true };
+					}
+				} catch ( e ) {
+					return { blocked: true };
+				}
+				try {
+					if ( win.__bltLab && 'function' === typeof win.__bltLab.collect && 'function' === typeof win.__bltLab.state ) {
+						return { api: win.__bltLab };
+					}
+				} catch ( e ) {}
+				return { missing: true };
+			}
+
+			// A frame's own observer is not told about its long animation frames (Chrome reports them
+				// to the top-level page, naming the frame that ran each script), so this page watches them
+				// and keeps the ones that ran the framed page's scripts.
+				function watchLoaf() {
+					run.loafEntries = [];
+					try {
+						var types = window.PerformanceObserver && window.PerformanceObserver.supportedEntryTypes;
+						if ( types && types.indexOf( 'long-animation-frame' ) > -1 ) {
+							run.loafWatch = new window.PerformanceObserver( function ( list ) {
+								run.loafEntries = run.loafEntries.concat( list.getEntries() );
+							} );
+							run.loafWatch.observe( { type: 'long-animation-frame' } );
+						}
+					} catch ( e ) {
+						run.loafWatch = null;
+					}
+				}
+
+				function framedLoaf( win ) {
+					var frames = [];
+					if ( run.loafWatch ) {
+						run.loafEntries = run.loafEntries.concat( run.loafWatch.takeRecords() );
+					}
+					// Times in the payload are relative to the framed page's own navigation start.
+					var offset = window.performance.timeOrigin - win.performance.timeOrigin;
+					run.loafEntries.forEach( function ( entry ) {
+						var scripts = [];
+						var all = 0;
+						var own = 0;
+						( entry.scripts || [] ).forEach( function ( script ) {
+							var mine = false;
+							try {
+								mine = script.window === win;
+							} catch ( e ) {}
+							all += Number( script.duration ) || 0;
+							if ( mine ) {
+								own += Number( script.duration ) || 0;
+								scripts.push( {
+									url: String( script.sourceURL || '' ).replace( /([?&])blt_lab=[^&#]*&?/, '$1' ).replace( /[?&]$/, '' ),
+									fn: String( script.sourceFunctionName || '' ),
+									invoker: String( script.invoker || '' ).replace( /([?&])blt_lab=[^&#]*&?/, '$1' ).replace( /[?&]$/, '' ),
+									invokerType: String( script.invokerType || '' ),
+									duration: Math.round( ( Number( script.duration ) || 0 ) * 10 ) / 10,
+									forcedLayout: Math.round( ( Number( script.forcedStyleAndLayoutDuration ) || 0 ) * 10 ) / 10
+								} );
+							}
+						} );
+						if ( ! scripts.length ) {
+							return;
+						}
+						// A frame shared with this admin page's own scripts is only charged for the framed page's share.
+						var shared = own < all - 0.5;
+						scripts.sort( function ( a, b ) {
+							return b.duration - a.duration;
+						} );
+						frames.push( {
+							start: Math.max( 0, Math.round( ( entry.startTime + offset ) * 10 ) / 10 ),
+							duration: Math.round( ( shared ? own : entry.duration ) * 10 ) / 10,
+							blocking: Math.round( ( shared ? entry.blockingDuration * ( own / all ) : entry.blockingDuration ) * 10 ) / 10,
+							scripts: scripts.slice( 0, 12 )
+						} );
+					} );
+					frames.sort( function ( a, b ) {
+						return b.duration - a.duration;
+					} );
+					return frames.slice( 0, 20 );
+				}
+
+				function addWarning( payload, code ) {
+				payload.warnings = Array.isArray( payload.warnings ) ? payload.warnings : [];
+				if ( payload.warnings.indexOf( code ) < 0 ) {
+					payload.warnings.push( code );
+				}
+			}
+
+			function save( payload ) {
+				phase( 'saving' );
+				api.post( 'perf_lab_store', {
+					url: opts.url,
+					viewport: viewport,
+					payload: JSON.stringify( payload ),
+					scan: opts.scan ? 1 : 0
+				} )
+					.done( function ( response ) {
+						if ( run.aborted ) {
+							return;
+						}
+						if ( ! response || ! response.success ) {
+							fail( response && response.data && response.data.message );
+							return;
+						}
+						teardown();
+						deferred.resolve( { viewport: viewport, data: response.data || {}, payload: payload } );
+					} )
+					.fail( function () {
+						if ( ! run.aborted ) {
+							fail( t( 'error' ) );
+						}
+					} );
+			}
+
+			// kind: done | timeout (still busy, or never finished loading).
+			function conclude( kind ) {
+				window.clearTimeout( run.timer );
+				var found = inspect();
+				var payload = null;
+				phase( 'collecting' );
+
+				if ( found.blocked ) {
+					payload = { version: 1, warnings: [ 'framed_blocked' ] };
+				} else if ( found.api ) {
+					try {
+						payload = found.api.collect();
+						if ( payload && payload.nav && ( ! payload.loaf || ! payload.loaf.length ) && run.loafWatch ) {
+							payload.loaf = framedLoaf( run.frame.contentWindow );
+						}
+					} catch ( e ) {
+						payload = payload && 'object' === typeof payload ? payload : null;
+					}
+				}
+				if ( ! payload || 'object' !== typeof payload ) {
+					payload = { version: 1, warnings: [ 'no_observer' ] };
+				}
+
+				// Unreliable run: repeat once when it can be.
+				if ( payload.nav && ( run.hiddenSeen || ( run.offscreen && ! payload.lcp ) ) && run.retries < 1 ) {
+					run.retries++;
+					teardown();
+					phase( 'retry' );
+					run.timer = window.setTimeout( attempt, 400 );
+					return;
+				}
+
+				if ( 'timeout' === kind ) {
+					addWarning( payload, 'timeout' );
+				}
+				if ( run.hiddenSeen && payload.nav ) {
+					addWarning( payload, 'hidden_tab' );
+				}
+				save( payload );
+			}
+
+			function check() {
+				if ( run.aborted || ! run.frame ) {
+					return;
+				}
+				if ( 'hidden' === document.visibilityState ) {
+					// No painting happens in a background tab: wait for the admin to come back.
+					run.hiddenSeen = true;
+					phase( 'hidden' );
+					run.timer = window.setTimeout( check, 1000 );
+					return;
+				}
+				if ( ! onScreen() ) {
+					run.offscreen = true;
+					bringIntoView();
+				}
+
+				var elapsed = Date.now() - run.started;
+				if ( ! run.loaded ) {
+					if ( elapsed >= LAB_TOTAL_CAP ) {
+						conclude( 'timeout' );
+						return;
+					}
+					run.timer = window.setTimeout( check, LAB_POLL_MS );
+					return;
+				}
+
+				var found = inspect();
+				if ( ! found.api ) {
+					// Refused (blocked) or no observer on the page: nothing will change.
+					conclude( 'done' );
+					return;
+				}
+				var observed = null;
+				try {
+					observed = found.api.state();
+				} catch ( e ) {
+					observed = null;
+				}
+				if ( ! observed ) {
+					conclude( 'done' );
+					return;
+				}
+				if ( observed.loaded && Number( observed.quietFor ) >= LAB_QUIET_MS ) {
+					conclude( 'done' );
+					return;
+				}
+				if ( Date.now() - run.loadedAt >= LAB_LOAD_CAP || elapsed >= LAB_TOTAL_CAP ) {
+					conclude( 'timeout' );
+					return;
+				}
+				phase( 'settling' );
+				run.timer = window.setTimeout( check, LAB_POLL_MS );
+			}
+
+			function onLoad() {
+				var href = '';
+				try {
+					href = run.frame.contentWindow.location.href;
+				} catch ( e ) {
+					href = 'blocked';
+				}
+				if ( 'about:blank' === href || run.loaded ) {
+					return;
+				}
+				run.loaded = true;
+				run.loadedAt = Date.now();
+			}
+
+			function startFrame( src ) {
+				var $frame = $( '<iframe></iframe>' ).attr( {
+					width: size.w,
+					height: size.h,
+					scrolling: 'no',
+					title: tf( 'labFrameTitle', opts.url ),
+					tabindex: -1
+				} );
+				run.frame = $frame[ 0 ];
+					opts.$mount.find( '.blt-lab-frame' ).append( $frame );
+					labRunner.fit( opts.$mount, viewport );
+					run.loaded = false;
+				run.loadedAt = 0;
+				run.offscreen = false;
+				run.hiddenSeen = 'hidden' === document.visibilityState;
+				run.started = Date.now();
+				watchLoaf();
+
+				$( window ).on( 'resize' + ns, function () {
+					labRunner.fit( opts.$mount, viewport );
+				} );
+				$( document ).on( 'visibilitychange' + ns, function () {
+					if ( 'hidden' === document.visibilityState ) {
+						run.hiddenSeen = true;
+					}
+				} );
+				$frame.on( 'load', onLoad );
+				phase( 'loading' );
+				$frame.attr( 'src', src );
+				bringIntoView();
+				run.timer = window.setTimeout( check, LAB_POLL_MS );
+			}
+
+			function attempt() {
+				if ( run.aborted ) {
+						return;
+					}
+					// The panel shows straight away, so a wait for the token or for the tab is visible too.
+					run.$phase = labRunner.buildStage( opts, viewport );
+					// A background tab can't paint: don't start until it is visible.
+					if ( 'hidden' === document.visibilityState ) {
+					phase( 'hidden' );
+					$( document ).one( 'visibilitychange' + ns, attempt );
+					return;
+				}
+				phase( 'token' );
+				api.post( 'perf_lab_token', { url: opts.url } )
+					.done( function ( response ) {
+						if ( run.aborted ) {
+							return;
+						}
+						if ( ! response || ! response.success || ! response.data || ! response.data.src ) {
+							fail( response && response.data && response.data.message );
+							return;
+						}
+						startFrame( response.data.src );
+					} )
+					.fail( function () {
+						if ( ! run.aborted ) {
+							fail( t( 'error' ) );
+						}
+					} );
+			}
+
+			attempt();
+
+			return {
+				promise: deferred.promise(),
+				abort: function () {
+					if ( run.aborted ) {
+						return;
+					}
+					run.aborted = true;
+					$( document ).off( ns );
+					teardown();
+					deferred.reject( { aborted: true } );
+				}
+			};
+		},
+
+		/**
+		 * The device-frame panel: a header (what is being measured, and what it is
+		 * doing now) and an empty device to put the page's frame in. Returns the phase element.
+		 */
+		buildStage: function ( opts, viewport ) {
+			var size = LAB_VIEWPORTS[ viewport ];
+			var steps = opts.steps > 1 ? ' ' + tf( 'labStepOf', opts.step, opts.steps ) : '';
+			var html = '<div class="blt-lab-head"><span class="spinner is-active" aria-hidden="true"></span>' +
+				'<div class="blt-lab-title"><strong>' + escapeHtml( tf( 'labMeasuring', t( 'mobile' === viewport ? 'strategyMobile' : 'strategyDesktop' ) ) + steps ) + '</strong>' +
+				'<span class="blt-lab-url">' + escapeHtml( opts.title || opts.url ) + '</span></div>' +
+				'<span class="blt-lab-phase" role="status"></span></div>' +
+				'<div class="blt-lab-stage"><div class="blt-lab-device is-' + viewport + '">' +
+				( 'desktop' === viewport ? '<div class="blt-lab-bar" aria-hidden="true"><i></i><i></i><i></i><span>' + escapeHtml( opts.url ) + '</span></div>' : '' ) +
+				'<div class="blt-lab-screen"><div class="blt-lab-frame"></div></div></div></div>' +
+				'<p class="blt-lab-note">' + escapeHtml( tf( 'labFrameNote', size.w, size.h ) ) + '</p>';
+
+			opts.$mount.prop( 'hidden', false ).html( html );
+			labRunner.fit( opts.$mount, viewport );
+			return opts.$mount.find( '.blt-lab-phase' );
+		},
+
+		// Scale the frame so the whole device fits the panel and the window.
+		fit: function ( $mount, viewport ) {
+			var size = LAB_VIEWPORTS[ viewport ];
+			var $stage = $mount.find( '.blt-lab-stage' );
+			if ( ! $stage.length ) {
+				return;
+			}
+			var availableW = Math.max( 200, $stage.innerWidth() - 48 );
+			var availableH = Math.max( 280, Math.min( 620, ( window.innerHeight || 800 ) - 300 ) );
+			var scale = Math.min( 1, availableW / size.w, availableH / size.h );
+			var w = Math.round( size.w * scale );
+			var h = Math.round( size.h * scale );
+			$mount.find( '.blt-lab-screen' ).css( { width: w + 'px', height: h + 'px' } );
+			$mount.find( '.blt-lab-frame' ).css( { width: size.w + 'px', height: size.h + 'px', transform: 'scale(' + scale.toFixed( 4 ) + ')' } );
+		},
+
+		clearStage: function ( $mount ) {
+			$mount.prop( 'hidden', true ).empty();
+		}
+	};
+
+	/* ------------------------------------------------------------------ */
+	/* Lab results: the Lab (Core Web Vitals) view, shared by both screens */
+	/* ------------------------------------------------------------------ */
+
+	var labui = {
+		// Where a URL comes from, when the server did not say.
+		guessComponent: function ( url ) {
+			url = String( url || '' );
+			if ( ! url ) {
+				return { type: 'other', slug: 'inline', name: t( 'labInline' ) };
+			}
+			var host = hostOf( url );
+			if ( host && host !== String( window.location.host ).toLowerCase() ) {
+				return { type: 'external', slug: host, name: host };
+			}
+			var match = /\/wp-content\/(plugins|themes|mu-plugins)\/([^\/?#]+)/.exec( url );
+			if ( match ) {
+				return { type: 'plugins' === match[ 1 ] ? 'plugin' : ( 'themes' === match[ 1 ] ? 'theme' : 'mu-plugin' ), slug: match[ 2 ], name: match[ 2 ] };
+			}
+			if ( /\/wp-(includes|admin)\//.test( url ) ) {
+				return { type: 'core', slug: 'wordpress', name: t( 'labCore' ) };
+			}
+			return { type: 'other', slug: 'site', name: t( 'labSite' ) };
+		},
+
+		component: function ( item ) {
+			return item && item.component && 'object' === typeof item.component ? item.component : labui.guessComponent( item && ( item.url || item.href ) );
+		},
+
+		// The numbers every view shows, from the server summary when it has them and from the raw payload otherwise.
+		metrics: function ( lab, summary ) {
+			lab = lab || {};
+			summary = summary && 'object' === typeof summary && ! Array.isArray( summary ) ? summary : {};
+			var nav = lab.nav || {};
+			var values = {
+				lcp: labPick( summary.lcp, lab.lcp ? lab.lcp.time : null ),
+				cls: labPick( summary.cls, lab.cls ? lab.cls.value : null ),
+				tbt: labPick( summary.tbt, lab.tbt ? lab.tbt.value : null ),
+				fcp: labPick( summary.fcp, nav.fcp ),
+				ttfb: labPick( summary.ttfb, nav.ttfb ),
+				load: labPick( summary.load, nav.load )
+			};
+			var ratings = {};
+			LAB_METRICS.forEach( function ( key ) {
+				ratings[ key ] = summary.ratings && summary.ratings[ key ] ? summary.ratings[ key ] : labRate( key, values[ key ] );
+			} );
+			return { values: values, ratings: ratings };
+		},
+
+		// One metric tile; the border and the verdict line carry the rating.
+		tile: function ( key, value, rating, sub ) {
+			return '<div class="blt-stat ' + ( LAB_RATING_CLASS[ rating ] || '' ) + '">' +
+				'<span class="blt-stat-label"><abbr title="' + escapeHtml( t( 'metric_' + key ) ) + '">' + escapeHtml( key.toUpperCase() ) + '</abbr></span>' +
+				'<span class="blt-stat-value">' + escapeHtml( labValue( key, value ) ) + '</span>' +
+				'<span class="blt-stat-sub">' + escapeHtml( labVerdict( rating ) || sub || t( 'metric_' + key ) ) + '</span></div>';
+		},
+
+		tilesHtml: function ( metrics ) {
+			var html = '<div class="blt-stats blt-perf-metrics blt-lab-metrics">';
+			LAB_METRICS.forEach( function ( key ) {
+				html += labui.tile( key, metrics.values[ key ], metrics.ratings[ key ], '' );
+			} );
+			return html + '</div>';
+		},
+
+		// What a request cost on the wire (the encoded size when it came from the cache, so reruns compare).
+		resourceBytes: function ( resource ) {
+			if ( isNumber( resource.size ) ) {
+				return Number( resource.size );
+			}
+			return Number( resource.transfer ) > 0 ? Number( resource.transfer ) : ( Number( resource.encoded ) || 0 );
+		},
+
+		// css | js | img | font | other, from the file extension and what asked for it.
+		resourceKind: function ( resource ) {
+			if ( resource.kind && /^(css|js|img|font|other)$/.test( resource.kind ) ) {
+				return resource.kind;
+			}
+			var path = String( resource.url || '' ).split( '#' )[ 0 ].split( '?' )[ 0 ].toLowerCase();
+			if ( /\.(woff2?|ttf|otf|eot)$/.test( path ) ) {
+				return 'font';
+			}
+			if ( /\.(png|jpe?g|gif|webp|avif|svg|ico|bmp)$/.test( path ) || 'img' === resource.type ) {
+				return 'img';
+			}
+			if ( /\.css$/.test( path ) || 'css' === resource.type || ( 'link' === resource.type && ! /\.js$/.test( path ) ) ) {
+				return 'css';
+			}
+			if ( /\.(m?js)$/.test( path ) || 'script' === resource.type ) {
+				return 'js';
+			}
+			return 'other';
+		},
+
+		warningText: function ( code ) {
+			var key = 'labWarn_' + code;
+			return Object.prototype.hasOwnProperty.call( i18n, key ) ? i18n[ key ] : '';
+		},
+
+		warningsHtml: function ( lab ) {
+			var html = '';
+			( lab.warnings || [] ).forEach( function ( code ) {
+				var text = labui.warningText( code );
+				if ( text ) {
+					var severe = 'framed_blocked' === code || 'no_observer' === code;
+					html += '<div class="blt-stack-top">' + callout( severe ? t( 'labCouldNotRun' ) : '', text, severe ? 'is-error' : 'is-warning' ) + '</div>';
+				}
+			} );
+			return html;
+		},
+
+		// Whether the page was measured at all (a refused frame leaves only warnings).
+		measured: function ( lab ) {
+			return !! ( lab && lab.nav );
+		},
+
+		// Same question for a compact per-viewport summary from the report.
+		measuredSummary: function ( summary ) {
+			return !! summary && ( isNumber( summary.lcp ) || isNumber( summary.cls ) || isNumber( summary.tbt ) || isNumber( summary.fcp ) );
+		},
+
+		// A coloured metric cell for the pages table.
+		cellHtml: function ( summary, key ) {
+			if ( ! summary || 'object' !== typeof summary ) {
+				return escapeHtml( DASH );
+			}
+			if ( ! isNumber( summary[ key ] ) ) {
+				var blocked = ( summary.warnings || [] ).some( function ( code ) {
+					return 'framed_blocked' === code || 'no_observer' === code;
+				} );
+				return 'lcp' === key && blocked ? badge( t( 'labBlockedShort' ), 'blt-badge-cancelled' ) : escapeHtml( DASH );
+			}
+			return labValueHtml( key, summary[ key ], summary.ratings && summary.ratings[ key ] );
+		},
+
+		/* --- Panels ----------------------------------------------------- */
+
+		lcpHtml: function ( lab ) {
+			var lcp = lab.lcp;
+			var nav = lab.nav || {};
+			var dpr = Number( lab.viewport && lab.viewport.dpr ) || 1;
+			var html = '<h3>' + escapeHtml( t( 'labLcpElement' ) ) + '</h3>';
+			if ( ! lcp ) {
+				return html + '<p class="description">' + escapeHtml( t( 'labNoLcp' ) ) + '</p>';
+			}
+
+			var facts = [];
+			var element = '<code>' + escapeHtml( lcp.selector || lcp.tag || DASH ) + '</code>';
+			var bricks = labui.bricksHtml( lcp.bricks, lcp.bricksId );
+			facts.push( [ t( 'labFactElement' ), element + ( bricks ? '<span class="blt-perf-sub">' + bricks + '</span>' : '' ) ] );
+
+			var kind = lcp.isImage ? ( lcp.isBackground ? t( 'labKindBackground' ) : t( 'labKindImage' ) ) : t( 'labKindText' );
+			facts.push( [ t( 'labFactType' ), escapeHtml( kind ) + ( lcp.tag ? ' · <code>&lt;' + escapeHtml( lcp.tag ) + '&gt;</code>' : '' ) ] );
+			facts.push( [ t( 'labFactRendered' ), escapeHtml( ms( lcp.time ) ) + ( lcp.size ? ' · ' + escapeHtml( tf( 'labPixels', num( lcp.size ) ) ) : '' ) ] );
+
+			if ( lcp.isImage && lcp.url ) {
+				var resource = null;
+				( lab.resources || [] ).forEach( function ( item ) {
+					if ( ! resource && item.url === lcp.url ) {
+						resource = item;
+					}
+				} );
+				facts.push( [ t( 'labFactImage' ), link( lcp.url, fileName( lcp.url ) || lcp.url, true ) +
+					( resource ? ' ' + compChip( labui.component( resource ) ) + '<span class="blt-perf-sub">' + escapeHtml( bytes( labui.resourceBytes( resource ) ) + ( resource.cached ? ' · ' + t( 'labCached' ) : '' ) ) + '</span>' : '' ) ] );
+				if ( lcp.naturalW && lcp.renderedW ) {
+					var needW = Math.round( lcp.renderedW * dpr );
+					var needH = Math.round( lcp.renderedH * dpr );
+					facts.push( [ t( 'labFactSize' ), escapeHtml( tf( 'labSizeCompare', lcp.naturalW + '×' + lcp.naturalH, Math.round( lcp.renderedW ) + '×' + Math.round( lcp.renderedH ), needW + '×' + needH, dpr ) ) ] );
+				}
+				var attrs = [];
+				[ 'loading', 'fetchpriority', 'decoding' ].forEach( function ( name ) {
+					if ( lcp[ name ] ) {
+						attrs.push( '<code>' + escapeHtml( name + '=' + lcp[ name ] ) + '</code>' );
+					}
+				} );
+				facts.push( [ t( 'labFactAttrs' ), attrs.length ? attrs.join( ' ' ) : escapeHtml( t( 'labNoAttrs' ) ) ] );
+			} else if ( lcp.text ) {
+				facts.push( [ t( 'labFactText' ), escapeHtml( '“' + lcp.text + '”' ) ] );
+			}
+
+			html += '<div class="blt-lab-card">' + tableHtml( [ t( 'colMetric' ), t( 'colValue' ) ], facts.map( function ( fact ) {
+				return [ escapeHtml( fact[ 0 ] ), fact[ 1 ] ];
+			} ), 'blt-lab-facts' ) + '</div>';
+
+			html += labui.lcpBreakdown( lcp, nav );
+
+			var causes = labui.lcpCauses( lab );
+			if ( causes.length ) {
+				html += '<h4 class="blt-lab-h4">' + escapeHtml( t( 'labCauses' ) ) + '</h4><ul class="blt-lab-causes">';
+				causes.forEach( function ( cause ) {
+					html += '<li>' + escapeHtml( cause ) + '</li>';
+				} );
+				html += '</ul>';
+			}
+			return html;
+		},
+
+		// Google's four LCP phases: server, finding the resource, downloading it, painting it.
+		lcpBreakdown: function ( lcp, nav ) {
+			var ttfb = Math.min( Number( nav.ttfb ) || 0, lcp.time );
+			var resource = lcp.resource;
+			var parts;
+			if ( resource ) {
+				var start = Math.max( ttfb, Number( resource.start ) || 0 );
+				var end = Math.max( start, Number( resource.end ) || 0 );
+				parts = [
+					[ 'ttfb', t( 'labPartTtfb' ), ttfb ],
+					[ 'delay', t( 'labPartDelay' ), start - ttfb ],
+					[ 'load', t( 'labPartLoad' ), end - start ],
+					[ 'render', t( 'labPartRender' ), Math.max( 0, lcp.time - end ) ]
+				];
+			} else {
+				parts = [
+					[ 'ttfb', t( 'labPartTtfb' ), ttfb ],
+					[ 'render', t( 'labPartRenderText' ), Math.max( 0, lcp.time - ttfb ) ]
+				];
+			}
+			var total = parts.reduce( function ( sum, part ) {
+				return sum + part[ 2 ];
+			}, 0 );
+			if ( ! total ) {
+				return '';
+			}
+			var html = '<div class="blt-perf-timeline blt-lab-timeline" role="img" aria-label="' + escapeHtml( tf( 'labBreakdownLabel', ms( lcp.time ) ) ) + '">';
+			var legend = '<ol class="blt-perf-legend">';
+			parts.forEach( function ( part, index ) {
+				var seg = index + 1 + ( parts.length < 4 && index ? 2 : 0 );
+				if ( part[ 2 ] > 0 ) {
+					html += '<span class="blt-perf-seg blt-perf-seg-' + seg + '" style="width:' + ( ( 100 * part[ 2 ] ) / total ).toFixed( 2 ) + '%" title="' + escapeHtml( part[ 1 ] + ': ' + ms( part[ 2 ] ) ) + '"></span>';
+				}
+				legend += '<li><span class="blt-perf-swatch blt-perf-seg-' + seg + '" aria-hidden="true"></span><span class="blt-perf-legend-name"><strong>' + escapeHtml( part[ 1 ] ) + '</strong></span>' +
+					'<span class="blt-perf-legend-ms">' + escapeHtml( ms( part[ 2 ] ) ) + '</span><span class="blt-perf-legend-pct">' + escapeHtml( Math.round( ( 100 * part[ 2 ] ) / total ) + '%' ) + '</span></li>';
+			} );
+			return '<h4 class="blt-lab-h4">' + escapeHtml( t( 'labBreakdown' ) ) + '</h4>' + html + '</div>' + legend + '</ol>';
+		},
+
+		lcpCauses: function ( lab ) {
+			var lcp = lab.lcp;
+			var nav = lab.nav || {};
+			var dpr = Number( lab.viewport && lab.viewport.dpr ) || 1;
+			var causes = [];
+			if ( ! lcp ) {
+				return causes;
+			}
+			if ( Number( nav.ttfb ) > LAB_THRESHOLDS.ttfb[ 0 ] ) {
+				causes.push( tf( 'labCauseTtfb', ms( nav.ttfb ) ) );
+			}
+			if ( lcp.isImage ) {
+				if ( 'lazy' === lcp.loading ) {
+					causes.push( t( 'labCauseLazy' ) );
+				}
+				if ( ! lcp.isBackground && 'high' !== lcp.fetchpriority && 'lazy' !== lcp.loading ) {
+					causes.push( t( 'labCausePriority' ) );
+				}
+				if ( lcp.isBackground ) {
+					causes.push( t( 'labCauseBackground' ) );
+				}
+				if ( lcp.naturalW && lcp.renderedW && lcp.naturalW > 1.5 * lcp.renderedW * dpr ) {
+					causes.push( tf( 'labCauseOversized', lcp.naturalW + '×' + lcp.naturalH, Math.round( lcp.renderedW * dpr ) + '×' + Math.round( lcp.renderedH * dpr ) ) );
+				}
+				if ( lcp.resource && Number( lcp.resource.start ) - Number( nav.ttfb || 0 ) > 500 ) {
+					causes.push( tf( 'labCauseLate', ms( Number( lcp.resource.start ) - Number( nav.ttfb || 0 ) ) ) );
+				}
+			}
+			var blocking = lcp.resource ? Number( lcp.resource.renderBlockingBefore ) || 0 : ( lab.resources || [] ).filter( function ( item ) {
+				return item.blocking && Number( item.end ) <= Number( lcp.time );
+			} ).length;
+			if ( blocking > 0 ) {
+				causes.push( tf( 'labCauseBlocking', blocking ) );
+			}
+			return causes;
+		},
+
+		// The Bricks element (and the template or page it lives in) behind a selector, when the server found it.
+		bricksHtml: function ( info, id ) {
+			var parts = [];
+			if ( info && 'object' === typeof info ) {
+				var name = info.label || info.name || info.element_label || info.element_name || info.element || info.type;
+				var where = info.template_title || info.template_name || info.template || info.post_title || info.title ||
+					( info.post && ( info.post.title || info.post.name ) ) || ( info.source && ( info.source.title || info.source.name ) ) || '';
+				var edit = info.edit_url || info.editUrl || info.edit_link || info.url ||
+					( info.post && info.post.edit_url ) || ( info.source && info.source.edit_url ) || '';
+				var text = tf( 'labBricksElement', name && 'object' !== typeof name ? name : ( id ? 'brxe-' + id : '' ) );
+				parts.push( escapeHtml( text ) );
+				if ( where && 'object' !== typeof where ) {
+					var label = tf( 'labBricksIn', where );
+					parts.push( safeUrl( edit ) ? '<a href="' + escapeHtml( safeUrl( edit ) ) + '">' + escapeHtml( label ) + '</a> <a class="button button-small" href="' + escapeHtml( safeUrl( edit ) ) + '">' + escapeHtml( t( 'labEditBricks' ) ) + '</a>' : escapeHtml( label ) );
+				} else if ( safeUrl( edit ) ) {
+					parts.push( '<a class="button button-small" href="' + escapeHtml( safeUrl( edit ) ) + '">' + escapeHtml( t( 'labEditBricks' ) ) + '</a>' );
+				}
+			} else if ( id ) {
+				parts.push( escapeHtml( tf( 'labBricksElement', 'brxe-' + id ) ) );
+			}
+			return parts.join( ' · ' );
+		},
+
+		shiftsHtml: function ( lab ) {
+			var cls = lab.cls || { value: 0, shifts: [] };
+			var shifts = ( cls.shifts || [] ).slice().sort( function ( a, b ) {
+				return Number( b.value ) - Number( a.value );
+			} );
+			var html = '<h3>' + escapeHtml( t( 'labShifts' ) ) + '</h3>';
+			if ( ! shifts.length ) {
+				return html + '<p class="description">' + escapeHtml( t( 'labNoShifts' ) ) + '</p>';
+			}
+			var max = Number( shifts[ 0 ].value ) || 0;
+			var rows = [];
+			function rect( box ) {
+				return Array.isArray( box ) && 4 === box.length ? Math.round( box[ 2 ] ) + '×' + Math.round( box[ 3 ] ) + ' @ ' + Math.round( box[ 0 ] ) + ',' + Math.round( box[ 1 ] ) : DASH;
+			}
+			shifts.forEach( function ( shift ) {
+				var sources = ( shift.sources || [] ).slice( 0, 3 );
+				if ( ! sources.length ) {
+					sources = [ null ];
+				}
+				sources.forEach( function ( source, index ) {
+					var bricks = source ? labui.bricksHtml( source.bricks, source.bricksId ) : '';
+					rows.push( [
+						index ? '' : { html: barHtml( Number( shift.value ) || 0, max, labValue( 'cls', shift.value ) ), cls: 'blt-perf-bar-cell' },
+						index ? '' : { html: escapeHtml( ms( shift.time ) ), cls: 'num' },
+						source ? '<code>' + escapeHtml( source.selector || source.tag || DASH ) + '</code>' + ( bricks ? '<span class="blt-perf-sub">' + bricks + '</span>' : '' ) : escapeHtml( t( 'labRemovedNode' ) ),
+						source ? escapeHtml( rect( source.prevRect ) + ' → ' + rect( source.currRect ) ) : escapeHtml( DASH )
+					] );
+				} );
+			} );
+			return html + '<p class="description">' + escapeHtml( tf( 'labShiftsHint', labValue( 'cls', cls.value ) ) ) + '</p>' +
+				tableHtml( [ t( 'labColShift' ), { label: t( 'colTime' ), cls: 'num' }, t( 'labColElement' ), t( 'labColMoved' ) ], rows, 'blt-lab-shifts' );
+		},
+
+		blockingHtml: function ( lab ) {
+			var list = ( lab.resources || [] ).filter( function ( item ) {
+				return item.blocking;
+			} ).sort( function ( a, b ) {
+				return Number( b.end ) - Number( a.end );
+			} );
+			var html = '<h3>' + escapeHtml( t( 'labBlocking' ) ) + ' <span class="blt-perf-tab-count">' + escapeHtml( num( list.length ) ) + '</span></h3>';
+			if ( ! list.length ) {
+				return html + '<p class="description">' + escapeHtml( t( 'labNoBlocking' ) ) + '</p>';
+			}
+			var last = Number( list[ 0 ].end ) || 0;
+			var rows = list.map( function ( item ) {
+				return [
+					link( item.url, fileName( item.url ) || item.url, true ) + '<span class="blt-perf-sub">' + escapeHtml( item.type || '' ) + '</span>',
+					compChip( labui.component( item ) ) || escapeHtml( DASH ),
+					bytes( labui.resourceBytes( item ) ),
+					escapeHtml( ms( item.start ) + ' → ' + ms( item.end ) ),
+					{ html: escapeHtml( ms( Math.max( 0, Number( item.end ) - Number( item.start ) ) ) ), cls: 'num' }
+				];
+			} );
+			return html + '<p class="description">' + escapeHtml( tf( 'labBlockingHint', list.length, ms( last ) ) ) + '</p>' +
+				tableHtml( [ t( 'colFile' ), t( 'colComponent' ), { label: t( 'colSize' ), cls: 'num' }, { label: t( 'labColWindow' ), cls: 'num' }, { label: t( 'colTime' ), cls: 'num' } ], rows, 'blt-lab-blocking' );
+		},
+
+		cssHtml: function ( lab ) {
+			var sheets = ( lab.css || [] ).filter( function ( sheet ) {
+				return Number( sheet.bytes ) > 0 || Number( sheet.rules ) > 0;
+			} );
+			var html = '<h3>' + escapeHtml( t( 'labUnusedCss' ) ) + '</h3>';
+			if ( ! sheets.length ) {
+				return html + '<p class="description">' + escapeHtml( t( 'labNoCss' ) ) + '</p>';
+			}
+
+			var total = sumBy( sheets, 'bytes' );
+			var unused = sumBy( sheets, 'unusedBytes' );
+			html += '<p class="description">' + escapeHtml( tf( 'labUnusedHint', bytes( unused ), total ? Math.round( ( 100 * unused ) / total ) : 0, bytes( total ) ) ) + '</p>';
+
+			// By component first: that is who to ask to stop shipping it.
+			var groups = {};
+			sheets.forEach( function ( sheet ) {
+				var component = labui.component( sheet );
+				var key = compKey( component );
+				groups[ key ] = groups[ key ] || { component: component, sheets: 0, bytes: 0, unused: 0 };
+				groups[ key ].sheets++;
+				groups[ key ].bytes += Number( sheet.bytes ) || 0;
+				groups[ key ].unused += Number( sheet.unusedBytes ) || 0;
+			} );
+			var groupList = Object.keys( groups ).map( function ( key ) {
+				return groups[ key ];
+			} ).sort( function ( a, b ) {
+				return b.unused - a.unused;
+			} );
+			var groupMax = groupList.length ? groupList[ 0 ].unused : 0;
+			html += tableHtml( [ t( 'colComponent' ), { label: t( 'labColSheets' ), cls: 'num' }, { label: t( 'colSize' ), cls: 'num' }, t( 'labColUnused' ) ], groupList.map( function ( group ) {
+				return [
+					compChip( group.component ) || escapeHtml( DASH ),
+					num( group.sheets ),
+					bytes( group.bytes ),
+					{ html: barHtml( group.unused, groupMax, bytes( group.unused ) + ' · ' + ( group.bytes ? Math.round( ( 100 * group.unused ) / group.bytes ) : 0 ) + '%' ), cls: 'blt-perf-bar-cell' }
+				];
+			} ), 'blt-lab-css-groups' );
+
+			var byUnused = sheets.slice().sort( function ( a, b ) {
+				return ( Number( b.unusedBytes ) || 0 ) - ( Number( a.unusedBytes ) || 0 ) || ( Number( b.bytes ) || 0 ) - ( Number( a.bytes ) || 0 );
+			} );
+			var shown = byUnused.slice( 0, 25 );
+			var max = shown.length ? Number( shown[ 0 ].unusedBytes ) || 0 : 0;
+			html += '<h4 class="blt-lab-h4">' + escapeHtml( t( 'labByStylesheet' ) ) + '</h4>';
+			html += tableHtml( [ t( 'labColStylesheet' ), t( 'colComponent' ), { label: t( 'colSize' ), cls: 'num' }, t( 'labColUnused' ), { label: t( 'labColRules' ), cls: 'num' } ], shown.map( function ( sheet ) {
+				var name = sheet.href ? link( sheet.href, fileName( sheet.href ) || sheet.href, true ) : '<code>' + escapeHtml( sheet.inlineId || t( 'labInlineStyle' ) ) + '</code>';
+				var note = '';
+				if ( ! sheet.accessible ) {
+					note = '<span class="blt-perf-sub is-warn">' + escapeHtml( t( 'labCrossOrigin' ) ) + '</span>';
+				} else if ( Number( sheet.otherMediaRules ) > 0 ) {
+					note = '<span class="blt-perf-sub">' + escapeHtml( plural( sheet.otherMediaRules, 'labOtherMediaOne', 'labOtherMediaMany' ) ) + '</span>';
+				}
+				var unusedPct = Number( sheet.bytes ) ? Math.round( ( 100 * ( Number( sheet.unusedBytes ) || 0 ) ) / Number( sheet.bytes ) ) : 0;
+				return [
+					name + note,
+					compChip( labui.component( sheet ) ) || escapeHtml( DASH ),
+					bytes( sheet.bytes ),
+					sheet.accessible ? { html: barHtml( Number( sheet.unusedBytes ) || 0, max, bytes( sheet.unusedBytes ) + ' · ' + unusedPct + '%' ), cls: 'blt-perf-bar-cell' } : DASH,
+					sheet.accessible ? escapeHtml( num( sheet.unusedRules ) + ' / ' + num( sheet.rules ) ) : DASH
+				];
+			} ), 'blt-lab-css' );
+			if ( byUnused.length > shown.length ) {
+				html += '<p class="description">' + escapeHtml( tf( 'labMoreSheets', byUnused.length - shown.length ) ) + '</p>';
+			}
+			return html;
+		},
+
+		mainThreadHtml: function ( lab, metrics ) {
+			var tbt = lab.tbt || { value: 0, longTasks: [], count: 0 };
+			var frames = lab.loaf || [];
+			var html = '<h3>' + escapeHtml( t( 'labMainThread' ) ) + '</h3>';
+
+			var longest = ( tbt.longTasks || [] ).reduce( function ( max, task ) {
+				return Math.max( max, Number( task.duration ) || 0 );
+			}, 0 );
+			var blocking = sumBy( frames, 'blocking' );
+			html += '<div class="blt-stats blt-perf-summary">' +
+				labui.tile( 'tbt', metrics.values.tbt, metrics.ratings.tbt, '' ) +
+				statTile( t( 'labLongTasks' ), num( tbt.count || 0 ), longest ? tf( 'labLongest', ms( longest ) ) : '' ) +
+				statTile( t( 'labFrames' ), num( frames.length ), frames.length ? tf( 'labFramesBlocking', ms( blocking ) ) : '' ) + '</div>';
+
+			var scripts = [];
+			frames.forEach( function ( frame ) {
+				( frame.scripts || [] ).forEach( function ( script ) {
+					scripts.push( script );
+				} );
+			} );
+
+			if ( ! scripts.length ) {
+				html += '<p class="description">' + escapeHtml( ( lab.warnings || [] ).indexOf( 'no_loaf' ) > -1 ? t( 'labWarn_no_loaf' ) : t( 'labNoScriptTime' ) ) + '</p>';
+			} else {
+				// Script time per component, then per script.
+				var groups = {};
+				var perScript = {};
+				scripts.forEach( function ( script ) {
+					var component = labui.component( { component: script.component, url: script.url } );
+					var key = compKey( component );
+					groups[ key ] = groups[ key ] || { component: component, ms: 0, forced: 0, count: 0 };
+					groups[ key ].ms += Number( script.duration ) || 0;
+					groups[ key ].forced += Number( script.forcedLayout ) || 0;
+					groups[ key ].count++;
+					var id = ( script.url || '' ) + '|' + ( script.fn || '' );
+					perScript[ id ] = perScript[ id ] || { script: script, component: component, ms: 0, forced: 0, count: 0 };
+					perScript[ id ].ms += Number( script.duration ) || 0;
+					perScript[ id ].forced += Number( script.forcedLayout ) || 0;
+					perScript[ id ].count++;
+				} );
+				var groupList = Object.keys( groups ).map( function ( key ) {
+					return groups[ key ];
+				} ).sort( function ( a, b ) {
+					return b.ms - a.ms;
+				} );
+				var max = groupList[ 0 ].ms;
+				html += '<p class="description">' + escapeHtml( t( 'labScriptTimeHint' ) ) + '</p>';
+				html += tableHtml( [ t( 'colComponent' ), t( 'labColScriptTime' ), { label: t( 'labColForced' ), cls: 'num' }, { label: t( 'labColCalls' ), cls: 'num' } ], groupList.map( function ( group ) {
+					return [
+						compChip( group.component ) || escapeHtml( DASH ),
+						{ html: barHtml( group.ms, max, ms( group.ms ) ), cls: 'blt-perf-bar-cell' },
+						group.forced ? ms( group.forced ) : DASH,
+						num( group.count )
+					];
+				} ), 'blt-lab-main-groups' );
+
+				var scriptList = Object.keys( perScript ).map( function ( key ) {
+					return perScript[ key ];
+				} ).sort( function ( a, b ) {
+					return b.ms - a.ms;
+				} ).slice( 0, 15 );
+				html += '<h4 class="blt-lab-h4">' + escapeHtml( t( 'labByScript' ) ) + '</h4>';
+				html += tableHtml( [ t( 'labColScript' ), t( 'colComponent' ), { label: t( 'labColScriptTime' ), cls: 'num' }, { label: t( 'labColForced' ), cls: 'num' }, t( 'labColTrigger' ) ], scriptList.map( function ( row ) {
+					var script = row.script;
+					return [
+						( script.url ? link( script.url, fileName( script.url ) || script.url, true ) : '<span>' + escapeHtml( t( 'labInline' ) ) + '</span>' ) +
+							( script.fn ? '<span class="blt-perf-sub"><code>' + escapeHtml( script.fn ) + '</code></span>' : '' ),
+						compChip( row.component ) || escapeHtml( DASH ),
+						ms( row.ms ),
+						row.forced ? ms( row.forced ) : DASH,
+						'<span class="blt-perf-sub">' + escapeHtml( script.invokerType || DASH ) + '</span>'
+					];
+				} ), 'blt-lab-main-scripts' );
+			}
+
+			var tasks = ( tbt.longTasks || [] ).slice( 0, 8 );
+			if ( tasks.length ) {
+				html += '<h4 class="blt-lab-h4">' + escapeHtml( t( 'labLongTaskList' ) ) + '</h4>';
+				html += tableHtml( [ { label: t( 'labColStart' ), cls: 'num' }, { label: t( 'colTime' ), cls: 'num' }, { label: t( 'labColBlocking' ), cls: 'num' } ], tasks.map( function ( task ) {
+					return [ ms( task.start ), ms( task.duration ), ms( Math.max( 0, Number( task.duration ) - 50 ) ) ];
+				} ), 'blt-lab-tasks' );
+			}
+			return html;
+		},
+
+		imagesHtml: function ( lab ) {
+			var dpr = Number( lab.viewport && lab.viewport.dpr ) || 1;
+			var sizes = {};
+			( lab.resources || [] ).forEach( function ( item ) {
+				sizes[ item.url ] = labui.resourceBytes( item );
+			} );
+			var flagged = [];
+			( lab.images || [] ).forEach( function ( image ) {
+				var flags = [];
+				var size = sizes[ image.src ] || 0;
+				var wasted = 0;
+				var needed = Number( image.renderedW ) * dpr;
+				if ( needed > 0 && Number( image.naturalW ) > 1.5 * needed ) {
+					wasted = size * ( 1 - ( needed * needed ) / ( Number( image.naturalW ) * Number( image.naturalW ) ) );
+					if ( wasted > 50 * 1024 ) {
+						flags.push( [ 'blt-badge-pending', tf( 'labFlagOversized', bytes( wasted ) ) ] );
+					}
+				}
+				if ( ! image.inInitialViewport && 'lazy' !== image.loading && image.complete && Number( image.renderedW ) > 0 ) {
+					flags.push( [ 'blt-badge-pending', t( 'labFlagOffscreen' ) ] );
+				}
+				if ( image.inInitialViewport && 'lazy' === image.loading ) {
+					flags.push( [ 'blt-badge-cancelled', t( 'labFlagLazyAbove' ) ] );
+				}
+				if ( flags.length ) {
+					flagged.push( { image: image, size: size, flags: flags, wasted: wasted } );
+				}
+			} );
+			var html = '<h3>' + escapeHtml( t( 'labImages' ) ) + ' <span class="blt-perf-tab-count">' + escapeHtml( num( ( lab.images || [] ).length ) ) + '</span></h3>';
+			if ( ! ( lab.images || [] ).length ) {
+				return html + '<p class="description">' + escapeHtml( t( 'noImages' ) ) + '</p>';
+			}
+			if ( ! flagged.length ) {
+				return html + '<p class="description">' + escapeHtml( t( 'labImagesOk' ) ) + '</p>';
+			}
+			flagged.sort( function ( a, b ) {
+				return b.size - a.size;
+			} );
+			html += '<p class="description">' + escapeHtml( t( 'labImagesHint' ) ) + '</p>';
+			return html + tableHtml( [ t( 'colImage' ), { label: t( 'colSize' ), cls: 'num' }, { label: t( 'colNatural' ), cls: 'num' }, { label: t( 'labColShownAt' ), cls: 'num' }, { label: '', sr: t( 'colFlags' ) } ], flagged.map( function ( row ) {
+				var image = row.image;
+				return [
+					link( image.src, fileName( image.src ) || image.src, true ) + '<span class="blt-perf-sub"><code>' + escapeHtml( image.selector || '' ) + '</code></span>',
+					row.size ? bytes( row.size ) : DASH,
+					image.naturalW ? escapeHtml( image.naturalW + '×' + image.naturalH ) : DASH,
+					escapeHtml( Math.round( image.renderedW ) + '×' + Math.round( image.renderedH ) + ( dpr > 1 ? ' @' + dpr + '×' : '' ) ),
+					row.flags.map( function ( flag ) {
+						return badge( flag[ 1 ], flag[ 0 ] );
+					} ).join( ' ' )
+				];
+			} ), 'blt-lab-images' );
+		},
+
+		resourcesHtml: function ( lab, summary ) {
+			var list = lab.resources || [];
+			var html = '<h3>' + escapeHtml( t( 'labResources' ) ) + ' <span class="blt-perf-tab-count">' + escapeHtml( num( list.length ) ) + '</span></h3>';
+			if ( ! list.length ) {
+				return html + '<p class="description">' + escapeHtml( t( 'labNoResources' ) ) + '</p>';
+			}
+
+			var groups = {};
+			var kinds = { js: 0, css: 0, img: 0, font: 0, other: 0 };
+			var total = 0;
+			list.forEach( function ( item ) {
+				var component = labui.component( item );
+				var key = compKey( component );
+				var size = labui.resourceBytes( item );
+				var kind = labui.resourceKind( item );
+				groups[ key ] = groups[ key ] || { component: component, count: 0, bytes: 0, kinds: {} };
+				groups[ key ].count++;
+				groups[ key ].bytes += size;
+				groups[ key ].kinds[ kind ] = ( groups[ key ].kinds[ kind ] || 0 ) + size;
+				kinds[ kind ] += size;
+				total += size;
+			} );
+
+			// The server summary also counts the HTML document itself.
+			var sums = summary && summary.bytes && 'object' === typeof summary.bytes && isNumber( summary.bytes.total ) ? summary.bytes : null;
+			var requestCount = sums && isNumber( summary.requests ) ? summary.requests : list.length;
+			html += '<div class="blt-stats blt-perf-summary">' +
+				statTile( t( 'labWeight' ), bytes( sums ? sums.total : total ), plural( requestCount, 'labRequestOne', 'labRequestMany' ) ) +
+				statTile( t( 'tileJs' ), bytes( sums ? sums.js : kinds.js ) ) + statTile( t( 'tileCss' ), bytes( sums ? sums.css : kinds.css ) ) +
+				statTile( t( 'tileImages' ), bytes( sums ? sums.img : kinds.img ) ) + statTile( t( 'labFonts' ), bytes( sums ? sums.font : kinds.font ) ) + '</div>';
+
+			var groupList = Object.keys( groups ).map( function ( key ) {
+				return groups[ key ];
+			} ).sort( function ( a, b ) {
+				return b.bytes - a.bytes || b.count - a.count;
+			} );
+			var max = groupList.length ? groupList[ 0 ].bytes : 0;
+			html += '<h4 class="blt-lab-h4">' + escapeHtml( t( 'labByComponent' ) ) + '</h4>' + tableHtml( [ t( 'colComponent' ), { label: t( 'colRequests' ), cls: 'num' }, t( 'labColTransferred' ), t( 'labColKinds' ) ], groupList.map( function ( group ) {
+				var parts = [];
+				[ 'js', 'css', 'img', 'font', 'other' ].forEach( function ( kind ) {
+					if ( group.kinds[ kind ] ) {
+						parts.push( t( 'labKind_' + kind ) + ' ' + bytes( group.kinds[ kind ] ) );
+					}
+				} );
+				return [
+					compChip( group.component ) || escapeHtml( DASH ),
+					num( group.count ),
+					{ html: barHtml( group.bytes, max, bytes( group.bytes ) ), cls: 'blt-perf-bar-cell' },
+					'<span class="blt-perf-sub">' + escapeHtml( parts.join( ' · ' ) ) + '</span>'
+				];
+			} ), 'blt-lab-resources' );
+
+			return html + labui.waterfallHtml( lab );
+		},
+
+		// The 40 slowest or largest requests against one time axis, with the paint milestones marked.
+		waterfallHtml: function ( lab ) {
+			var list = ( lab.resources || [] ).map( function ( item, index ) {
+				return { item: item, index: index, duration: Math.max( 0, Number( item.end ) - Number( item.start ) ), size: labui.resourceBytes( item ) };
+			} );
+			var picked = {};
+			list.slice().sort( function ( a, b ) {
+				return b.duration - a.duration;
+			} ).slice( 0, 30 ).forEach( function ( row ) {
+				picked[ row.index ] = true;
+			} );
+			list.slice().sort( function ( a, b ) {
+				return b.size - a.size;
+			} ).slice( 0, 12 ).forEach( function ( row ) {
+				if ( Object.keys( picked ).length < 40 ) {
+					picked[ row.index ] = true;
+				}
+			} );
+			var rows = list.filter( function ( row ) {
+				return picked[ row.index ];
+			} ).sort( function ( a, b ) {
+				return Number( a.item.start ) - Number( b.item.start );
+			} );
+
+			var nav = lab.nav || {};
+			var marks = [];
+			if ( isNumber( nav.fcp ) ) {
+				marks.push( [ 'fcp', 'FCP', Number( nav.fcp ) ] );
+			}
+			if ( lab.lcp && isNumber( lab.lcp.time ) ) {
+				marks.push( [ 'lcp', 'LCP', Number( lab.lcp.time ) ] );
+			}
+			if ( isNumber( nav.load ) && Number( nav.load ) > 0 ) {
+				marks.push( [ 'load', t( 'labMarkLoad' ), Number( nav.load ) ] );
+			}
+			var axis = rows.reduce( function ( max, row ) {
+				return Math.max( max, Number( row.item.end ) || 0 );
+			}, 0 );
+			marks.forEach( function ( mark ) {
+				axis = Math.max( axis, mark[ 2 ] );
+			} );
+			if ( ! axis || ! rows.length ) {
+				return '';
+			}
+			axis = Math.ceil( axis / 100 ) * 100;
+
+			function pct( value ) {
+				return Math.max( 0, Math.min( 100, ( 100 * value ) / axis ) );
+			}
+
+			var html = '<h4 class="blt-lab-h4">' + escapeHtml( t( 'labWaterfall' ) ) + '</h4><p class="description">' + escapeHtml( t( 'labWaterfallHint' ) ) + '</p>';
+			html += '<div class="blt-lab-wf"><div class="blt-lab-wf-legend">' +
+				'<span><i class="blt-lab-wf-key"></i>' + escapeHtml( t( 'labLegendNormal' ) ) + '</span>' +
+				'<span><i class="blt-lab-wf-key is-blocking"></i>' + escapeHtml( t( 'labLegendBlocking' ) ) + '</span>' +
+				'<span><i class="blt-lab-wf-key is-cached"></i>' + escapeHtml( t( 'labLegendCached' ) ) + '</span>';
+			marks.forEach( function ( mark ) {
+				html += '<span><i class="blt-lab-wf-line is-' + mark[ 0 ] + '"></i>' + escapeHtml( mark[ 1 ] + ' ' + ms( mark[ 2 ] ) ) + '</span>';
+			} );
+			html += '</div><ol class="blt-lab-wf-rows">';
+			html += '<li class="blt-lab-wf-axis" aria-hidden="true"><span></span><span class="blt-lab-wf-ticks">';
+			[ 0, 25, 50, 75, 100 ].forEach( function ( at ) {
+				html += '<span style="left:' + at + '%">' + escapeHtml( ms( ( axis * at ) / 100 ) ) + '</span>';
+			} );
+			html += '</span><span></span></li>';
+			rows.forEach( function ( row ) {
+				var item = row.item;
+				var start = pct( Number( item.start ) || 0 );
+				var width = Math.max( 0.6, pct( Number( item.end ) || 0 ) - start );
+				var cls = item.blocking ? ' is-blocking' : ( item.cached ? ' is-cached' : '' );
+				var name = fileName( item.url ) || item.url;
+				if ( /^i?frame$/.test( item.type ) ) {
+					name = ( hostOf( item.url ) || '' ) + '/' + name;
+				}
+				html += '<li class="blt-lab-wf-row"><span class="blt-lab-wf-name" title="' + escapeHtml( item.url ) + '">' + escapeHtml( name ) + '</span>' +
+					'<span class="blt-lab-wf-track">';
+				marks.forEach( function ( mark ) {
+					html += '<span class="blt-lab-wf-mark is-' + mark[ 0 ] + '" style="left:' + pct( mark[ 2 ] ).toFixed( 2 ) + '%"></span>';
+				} );
+				html += '<span class="blt-lab-wf-bar' + cls + '" style="left:' + start.toFixed( 2 ) + '%;width:' + width.toFixed( 2 ) + '%" title="' + escapeHtml( ms( item.start ) + ' → ' + ms( item.end ) ) + '"></span></span>' +
+					'<span class="blt-lab-wf-size">' + escapeHtml( row.size ? bytes( row.size ) : DASH ) + '</span></li>';
+			} );
+			return html + '</ol></div>';
+		},
+
+		// Secondary tiles: weight, requests, DOM, blocking, unused CSS.
+		pageTilesHtml: function ( lab, summary ) {
+			summary = summary && 'object' === typeof summary && ! Array.isArray( summary ) ? summary : {};
+			var resources = lab.resources || [];
+			var weight = summary.bytes && isNumber( summary.bytes.total ) ? Number( summary.bytes.total ) : resources.reduce( function ( sum, item ) {
+				return sum + labui.resourceBytes( item );
+			}, 0 );
+			var blocking = isNumber( summary.blocking_count ) ? Number( summary.blocking_count ) : resources.filter( function ( item ) {
+				return item.blocking;
+			} ).length;
+			var unused = isNumber( summary.unused_css_bytes ) ? Number( summary.unused_css_bytes ) : sumBy( lab.css || [], 'unusedBytes' );
+			var nodes = isNumber( summary.dom_nodes ) ? Number( summary.dom_nodes ) : ( lab.dom ? Number( lab.dom.nodes ) : null );
+			return '<div class="blt-stats blt-perf-summary">' +
+				statTile( t( 'labWeight' ), bytes( weight ), plural( isNumber( summary.requests ) ? summary.requests : resources.length, 'labRequestOne', 'labRequestMany' ) ) +
+				statTile( t( 'tileDom' ), num( nodes ), lab.dom && lab.dom.depth ? tf( 'depthSub', lab.dom.depth ) : '' ) +
+				statTile( t( 'labBlockingTile' ), num( blocking ), blocking ? t( 'renderBlockingHint' ) : t( 'noneBlocking' ), blocking ? 'is-warn' : 'is-good' ) +
+				statTile( t( 'labUnusedTile' ), bytes( unused ), t( 'labUnusedSub' ) ) + '</div>';
+		},
+
+		/**
+		 * The whole view for one viewport.
+		 */
+		viewHtml: function ( lab, summary ) {
+			var metrics = labui.metrics( lab, summary );
+			var html = labui.warningsHtml( lab );
+			if ( ! labui.measured( lab ) ) {
+				return html;
+			}
+			html += labui.tilesHtml( metrics );
+			html += '<p class="description blt-lab-caveat">' + escapeHtml( t( 'labCaveat' ) ) + '</p>';
+			html += labui.pageTilesHtml( lab, summary );
+			html += labui.lcpHtml( lab );
+			html += labui.shiftsHtml( lab );
+			html += labui.blockingHtml( lab );
+			html += labui.cssHtml( lab );
+			html += labui.mainThreadHtml( lab, metrics );
+			html += labui.imagesHtml( lab );
+			html += labui.resourcesHtml( lab, summary );
+			return html;
+		}
+	};
+
+	/* ------------------------------------------------------------------ */
+	/* Findings: merge lab findings into a list                            */
+	/* ------------------------------------------------------------------ */
+
+	var SEVERITY_RANK = { critical: 0, warning: 1, notice: 2, pass: 3 };
+
+	// Same weighing as BLT_Optimized_Findings::sort(): a count is a weaker signal than time or weight.
+	function impactWeight( item ) {
+		var impact = item.impact || {};
+		var value = Number( impact.value ) || 0;
+		return 'ms' === impact.type ? value : ( 'bytes' === impact.type ? value / 1024 : ( 'count' === impact.type ? value / 10 : 0 ) );
+	}
+
+	function mergeFindings( base, extra ) {
+		var byKey = {};
+		var list = [];
+		( base || [] ).concat( extra || [] ).forEach( function ( item ) {
+			if ( item && item.key && byKey[ item.key ] ) {
+				list[ list.indexOf( byKey[ item.key ] ) ] = item;
+			} else {
+				list.push( item );
+			}
+			if ( item && item.key ) {
+				byKey[ item.key ] = item;
+			}
+		} );
+		return list.map( function ( item, index ) {
+			return { item: item, index: index };
+		} ).sort( function ( a, b ) {
+			var ra = undefined === SEVERITY_RANK[ a.item.severity ] ? 9 : SEVERITY_RANK[ a.item.severity ];
+			var rb = undefined === SEVERITY_RANK[ b.item.severity ] ? 9 : SEVERITY_RANK[ b.item.severity ];
+			return ra - rb || impactWeight( b.item ) - impactWeight( a.item ) || a.index - b.index;
+		} ).map( function ( row ) {
+			return row.item;
+		} );
+	}
+
+	function withoutLabFindings( list ) {
+		return ( list || [] ).filter( function ( item ) {
+			return 'lab' !== item.source;
+		} );
+	}
+
+	/* ------------------------------------------------------------------ */
 	/* Performance Scan screen                                             */
 	/* ------------------------------------------------------------------ */
 
 	var MAX_RETRIES = 6;
-	var STEP_ORDER = [ 'health', 'media', 'pages', 'psi', 'compile' ];
+	var STEP_ORDER = [ 'health', 'media', 'pages', 'lab', 'psi', 'compile' ];
 
 	var scan = {
 		running: false,
@@ -757,6 +2043,9 @@
 		failures: 0,
 		payload: null,
 		sawPsi: false,
+		sawLab: false,
+		labRunning: false,
+		labHandle: null,
 		filter: { category: '', severity: '', dismissed: false },
 		open: {},
 		fixed: {},
@@ -791,9 +2080,10 @@
 				.done( function ( response ) {
 					if ( response && response.success && 'running' === response.data.status ) {
 						// A scan survives a page reload: pick it up where it is.
+						// (Mid lab step, the queue left to measure comes with it.)
 						scan.setRunning( true );
 						scan.showProgress( response.data );
-						scan.tick();
+						scan.advance( response.data, true );
 					}
 				} );
 		},
@@ -813,7 +2103,7 @@
 						scan.failures = 0;
 						scan.setRunning( true );
 						scan.showProgress( response.data );
-						scan.tick();
+						scan.advance( response.data, true );
 						return;
 					}
 					$( '#blt-perf-start, .blt-perf-run' ).prop( 'disabled', false );
@@ -823,7 +2113,7 @@
 						if ( status && status.success && 'running' === status.data.status ) {
 							scan.setRunning( true );
 							scan.showProgress( status.data );
-							scan.tick();
+							scan.advance( status.data, true );
 						}
 					} );
 				} )
@@ -835,6 +2125,7 @@
 
 		cancel: function () {
 			$( '#blt-perf-cancel' ).prop( 'disabled', true );
+			scan.stopLab();
 			api.post( 'perf_cancel' ).always( function () {
 				$( '#blt-perf-cancel' ).prop( 'disabled', false );
 				scan.setRunning( false );
@@ -853,7 +2144,7 @@
 
 		// One time-boxed server slice per request, until the scan reports done.
 		tick: function () {
-			if ( scan.polling || ! scan.running ) {
+			if ( scan.polling || ! scan.running || scan.labRunning ) {
 				return;
 			}
 			scan.polling = true;
@@ -870,16 +2161,127 @@
 					}
 					scan.failures = 0;
 					scan.showProgress( response.data );
-					if ( 'running' === response.data.status ) {
-						window.setTimeout( scan.tick, 200 );
-					} else {
-						scan.finish( response.data );
-					}
+					scan.advance( response.data, false );
 				} )
 				.fail( function () {
 					scan.polling = false;
 					scan.retry();
 				} );
+		},
+
+		// What to do with a progress payload: finish, hand over to the browser's lab
+		// step (the server only waits for it), or keep ticking.
+		advance: function ( progress, immediate ) {
+			if ( 'running' !== progress.status ) {
+				scan.finish( progress );
+				return;
+			}
+			if ( 'lab' === progress.step && progress.labQueue && progress.labQueue.length ) {
+				scan.runLabStep( progress );
+				return;
+			}
+			if ( immediate ) {
+				scan.tick();
+			} else {
+				window.setTimeout( scan.tick, 200 );
+			}
+		},
+
+		/* --- Lab step: this browser measures the pages ------------------- */
+
+		// Runs the queue the server handed over, one page at a time on the mobile
+		// viewport, then tells the server it is done and resumes ticking. The queue
+		// is whatever is still unmeasured, so a reload mid-step just continues.
+		runLabStep: function ( progress ) {
+			if ( scan.labRunning ) {
+				return;
+			}
+			var queue = progress.labQueue;
+			var total = Number( progress.pagesTotal ) || queue.length;
+			var already = Math.max( 0, total - queue.length );
+			var index = 0;
+			scan.labRunning = true;
+
+			function next() {
+				if ( ! scan.running ) {
+					scan.labRunning = false;
+					return;
+				}
+				if ( index >= queue.length ) {
+					scan.endLabStep();
+					return;
+				}
+				var item = queue[ index ];
+				var position = already + index + 1;
+				// The lab step takes about a sixth of the bar; creep through it page by page.
+				scan.setBar( Math.min( 99, Number( progress.percent ) + Math.floor( ( ( 100 / 6 ) * ( position - 1 ) ) / Math.max( 1, total ) ) ) );
+				$( '#blt-perf-label' ).text( tf( 'labScanPage', position, total ) );
+
+				scan.labHandle = labRunner.run( {
+					url: item.url,
+					viewport: 'mobile',
+					scan: true,
+					$mount: $( '#blt-perf-lab-stage' ),
+					title: ( item.label ? item.label + ' · ' : '' ) + item.url,
+					step: position,
+					steps: total
+				} );
+				scan.labHandle.promise
+					.done( function () {
+						index++;
+						next();
+					} )
+					.fail( function ( error ) {
+						if ( error && error.aborted ) {
+							scan.labRunning = false;
+							return;
+						}
+						scan.notice( tf( 'labScanSkipped', item.label || item.url, error && error.message ? error.message : t( 'error' ) ), 'is-warning' );
+						index++;
+						next();
+					} );
+			}
+
+			next();
+		},
+
+		endLabStep: function () {
+			labRunner.clearStage( $( '#blt-perf-lab-stage' ) );
+			scan.labHandle = null;
+			scan.labRunning = false;
+			scan.finishLabStep();
+		},
+
+		// perf_lab_done moves the server past the lab step; if it cannot be reached,
+		// tick() would do the same for an empty queue, so fall back to that.
+		finishLabStep: function () {
+			api.post( 'perf_lab_done' )
+				.done( function ( response ) {
+					if ( ! scan.running ) {
+						return;
+					}
+					if ( ! response || ! response.success ) {
+						scan.retry( response && response.data && response.data.message );
+						return;
+					}
+					scan.failures = 0;
+					scan.showProgress( response.data );
+					scan.advance( response.data, true );
+				} )
+				.fail( function () {
+					if ( scan.running ) {
+						scan.retry();
+					}
+				} );
+		},
+
+		stopLab: function () {
+			if ( scan.labHandle ) {
+				scan.labHandle.abort();
+			}
+			scan.labHandle = null;
+			scan.labRunning = false;
+			labRunner.clearStage( $( '#blt-perf-lab-stage' ) );
 		},
 
 		// Back off on failure; after a few attempts hand control to the user.
@@ -899,6 +2301,7 @@
 
 		finish: function ( progress ) {
 			scan.setRunning( false );
+			labRunner.clearStage( $( '#blt-perf-lab-stage' ) );
 			if ( 'completed' === progress.status ) {
 				$( '#blt-perf-label' ).text( t( 'scanComplete' ) );
 				scan.setBar( 100 );
@@ -939,15 +2342,18 @@
 			}
 		},
 
-		// health -> media -> pages -> (psi) -> report, as a row of step chips.
+		// health -> media -> pages -> (lab) -> (psi) -> report, as a row of step chips.
 		renderSteps: function ( step ) {
 			if ( 'psi' === step ) {
 				scan.sawPsi = true;
 			}
+			if ( 'lab' === step ) {
+				scan.sawLab = true;
+			}
 			var current = STEP_ORDER.indexOf( step );
 			var html = '';
 			STEP_ORDER.forEach( function ( id, index ) {
-				if ( 'psi' === id && ! scan.sawPsi ) {
+				if ( ( 'psi' === id && ! scan.sawPsi ) || ( 'lab' === id && ! scan.sawLab ) ) {
 					return;
 				}
 				var cls = current < 0 || index > current ? '' : ( index === current ? ' is-current' : ' is-done' );
@@ -1029,7 +2435,7 @@
 
 			scan.showErrors( report.errors );
 
-			var html = '<div id="blt-perf-score"></div><div id="blt-perf-psi"></div>';
+			var html = '<div id="blt-perf-score"></div><div id="blt-perf-lab"></div><div id="blt-perf-psi"></div>';
 			html += '<div class="blt-card blt-perf-findings-card" id="blt-perf-findings-card">' +
 				'<div class="blt-card-header"><h2>' + escapeHtml( t( 'topFixes' ) ) + '</h2>' +
 				'<p>' + escapeHtml( t( 'topFixesHint' ) ) + '</p>' +
@@ -1041,6 +2447,7 @@
 			$results.html( html );
 
 			scan.renderScores();
+			scan.renderLab();
 			scan.renderPsi();
 			scan.renderFilters();
 			scan.renderFindings();
@@ -1077,6 +2484,29 @@
 			html += '</div></div></div></div>';
 
 			$( '#blt-perf-score' ).html( html );
+		},
+
+		// Median lab metrics across the scanned pages (mobile viewport), styled like the PSI tiles.
+		renderLab: function () {
+			var $mount = $( '#blt-perf-lab' );
+			var measured = ( scan.payload.report.pages || [] ).filter( function ( page ) {
+				return page.lab && page.lab.mobile && labui.measuredSummary( page.lab.mobile );
+			} );
+			if ( ! measured.length ) {
+				$mount.empty();
+				return;
+			}
+			var html = '<div class="blt-card"><div class="blt-card-header"><h2>' + escapeHtml( t( 'labResultsTitle' ) ) + '</h2>' +
+				'<p>' + escapeHtml( tf( 'labResultsHint', plural( measured.length, 'labPageOne', 'labPageMany' ) ) ) + '</p></div><div class="blt-card-body">';
+			html += '<div class="blt-stats blt-perf-metrics blt-lab-metrics">';
+			LAB_METRICS.forEach( function ( key ) {
+				var value = median( measured.map( function ( page ) {
+					return page.lab.mobile[ key ];
+				} ) );
+				html += labui.tile( key, value, labRate( key, value ), '' );
+			} );
+			html += '</div><p class="description blt-lab-caveat">' + escapeHtml( t( 'labCaveat' ) ) + '</p></div></div>';
+			$mount.html( html );
 		},
 
 		renderPsi: function () {
@@ -1258,15 +2688,25 @@
 			}
 
 			var errorLabels = { page_cache: t( 'errPageCache' ), not_received: t( 'errNotReceived' ), http_error: t( 'errHttp' ) };
+			var hasLab = pages.some( function ( page ) {
+				return !! page.lab;
+			} );
 			var body = pages.map( function ( page ) {
 				var label = page.label || page.url;
 				var note = '';
 				if ( page.error ) {
 					note = '<span class="blt-perf-sub is-warn">' + escapeHtml( errorLabels[ page.error ] || page.error ) + '</span>';
 				}
-				return [
+				var cells = [
 					'<span class="blt-perf-main">' + escapeHtml( label ) + '</span><span class="blt-perf-sub">' + link( page.url, page.url, true ) + '</span>' + note,
-					scan.statusBadge( page.status ),
+					scan.statusBadge( page.status )
+				];
+				if ( hasLab ) {
+					[ 'lcp', 'cls', 'tbt' ].forEach( function ( key ) {
+						cells.push( { html: labui.cellHtml( page.lab && page.lab.mobile, key ), cls: 'num' } );
+					} );
+				}
+				return cells.concat( [
 					ms( page.ttfb_ms ),
 					ms( page.php_ms ),
 					twoLine( num( page.queries ), isNumber( page.query_ms ) ? ms( page.query_ms ) : '' ),
@@ -1276,12 +2716,17 @@
 					num( page.dom_nodes ),
 					num( page.requests ),
 					'<a class="button button-small" href="' + escapeHtml( scan.profileUrl( page.url ) ) + '">' + escapeHtml( t( 'profile' ) ) + '</a>'
-				];
+				] );
 			} );
 
-			html += tableHtml( [
+			var headers = [
 				t( 'colPage' ),
-				t( 'colStatus' ),
+				t( 'colStatus' )
+			];
+			if ( hasLab ) {
+				headers.push( { label: 'LCP', cls: 'num', title: t( 'labColMobile' ) }, { label: 'CLS', cls: 'num', title: t( 'labColMobile' ) }, { label: 'TBT', cls: 'num', title: t( 'labColMobile' ) } );
+			}
+			headers = headers.concat( [
 				{ label: 'TTFB', cls: 'num' },
 				{ label: t( 'colPhp' ), cls: 'num' },
 				{ label: t( 'colQueries' ), cls: 'num' },
@@ -1291,7 +2736,11 @@
 				{ label: t( 'colDom' ), cls: 'num' },
 				{ label: t( 'colRequests' ), cls: 'num' },
 				''
-			], body, 'blt-perf-pages', true );
+			] );
+			html += tableHtml( headers, body, 'blt-perf-pages', true );
+			if ( hasLab ) {
+				html += '<p class="blt-perf-tablenote">' + escapeHtml( t( 'labTableNote' ) ) + '</p>';
+			}
 			return html + '</div>';
 		}
 	};
@@ -1300,12 +2749,17 @@
 	/* Page Profiler screen                                                */
 	/* ------------------------------------------------------------------ */
 
-	var TABS = [ 'components', 'queries', 'assets', 'http', 'errors', 'content', 'timeline', 'raw' ];
+	var TABS = [ 'lab', 'components', 'queries', 'assets', 'http', 'errors', 'content', 'timeline', 'raw' ];
 
 	var profiler = {
 		data: null,
 		pages: { samples: [], stored: [] },
 		activeTab: 'components',
+		tabChosen: false,
+		tabs: TABS,
+		labView: 'mobile',
+		labCache: {},
+		labRun: null,
 		rendered: {},
 		blobUrl: '',
 		findingsState: { open: {}, fixed: {} },
@@ -1319,6 +2773,7 @@
 			$( '#blt-profiler-url' ).val( requested || bltPerf.homeUrl );
 
 			$( '#blt-profiler-run' ).on( 'click', profiler.run );
+			$( '#blt-profiler-lab-run' ).on( 'click', profiler.runLab );
 			$( '#blt-profiler-psi-run' ).on( 'click', profiler.runPsi );
 			$( '#blt-profiler-url' ).on( 'keydown', function ( event ) {
 				if ( 13 === event.which ) {
@@ -1334,7 +2789,12 @@
 
 			var $result = $( '#blt-profiler-result' );
 			$result.on( 'click', '.blt-perf-subtab', function () {
+				profiler.tabChosen = true;
 				profiler.selectTab( $( this ).attr( 'data-tab' ), true );
+			} );
+			$result.on( 'click', '.blt-lab-switch button', function () {
+				profiler.labView = $( this ).attr( 'data-view' );
+				$( '#blt-panel-lab' ).html( profiler.panel_lab( profiler.data.page || {} ) );
 			} );
 			$result.on( 'keydown', '.blt-perf-subtab', profiler.tabKeys );
 
@@ -1426,7 +2886,7 @@
 		},
 
 		busy: function ( busy, label ) {
-			$( '#blt-profiler-run, #blt-profiler-psi-run' ).prop( 'disabled', busy );
+			$( '#blt-profiler-run, #blt-profiler-psi-run, #blt-profiler-lab-run, #blt-lab-device' ).prop( 'disabled', busy );
 			$( '#blt-profiler-status' ).html( busy ?
 				'<span class="spinner is-active" aria-hidden="true"></span><span>' + escapeHtml( label ) + '</span>' : '' );
 			$( '#blt-profiler' ).toggleClass( 'is-busy', busy );
@@ -1473,6 +2933,141 @@
 					profiler.busy( false );
 					profiler.message( t( 'error' ), 'is-error' );
 				} );
+		},
+
+		/* --- Lab test ---------------------------------------------------- */
+
+		// Normalised key for a page URL (scheme, case and trailing slash ignored).
+		urlKey: function ( url ) {
+			return String( url || '' ).replace( /#.*$/, '' ).replace( /^https?:\/\//i, '' ).replace( /\/+$/, '' ).toLowerCase();
+		},
+
+		// Measure the page in this browser: mobile, desktop or both, one after the other.
+		runLab: function () {
+			if ( profiler.labRun ) {
+				return;
+			}
+			var url = profiler.urlValue();
+			if ( ! url ) {
+				profiler.message( t( 'enterUrl' ), 'is-error' );
+				return;
+			}
+			var device = $( '#blt-lab-device' ).val();
+			var queue = 'both' === device ? [ 'mobile', 'desktop' ] : [ 'desktop' === device ? 'desktop' : 'mobile' ];
+			var results = {};
+			var $stage = $( '#blt-profiler-lab-stage' );
+
+			profiler.busy( true, '' );
+			$( '#blt-profiler-status' ).empty();
+
+			function finish( failure ) {
+				profiler.labRun = null;
+				labRunner.clearStage( $stage );
+				profiler.busy( false );
+				if ( Object.keys( results ).length ) {
+					profiler.labDone( url, results );
+				}
+				if ( failure ) {
+					profiler.message( tf( 'labFailed', failure ), 'is-error' );
+				}
+			}
+
+			function next( index ) {
+				if ( index >= queue.length ) {
+					finish( '' );
+					return;
+				}
+				profiler.labRun = labRunner.run( { url: url, viewport: queue[ index ], scan: false, $mount: $stage, step: index + 1, steps: queue.length } );
+				profiler.labRun.promise
+					.done( function ( result ) {
+						results[ queue[ index ] ] = result;
+						next( index + 1 );
+					} )
+					.fail( function ( error ) {
+						finish( error && error.aborted ? '' : ( error && error.message ) || t( 'error' ) );
+					} );
+			}
+
+			next( 0 );
+		},
+
+		// Show what was measured: keep it for this URL, merge the lab findings in and open the Lab tab.
+		labDone: function ( url, results ) {
+			var key = profiler.urlKey( url );
+			var cache = profiler.labCache[ key ] = profiler.labCache[ key ] || { lab: {}, summary: {}, findings: [] };
+			var latest = null;
+			Object.keys( results ).forEach( function ( viewport ) {
+				var data = results[ viewport ].data || {};
+				cache.lab[ viewport ] = data.lab && data.lab.nav !== undefined ? data.lab : results[ viewport ].payload;
+				cache.summary[ viewport ] = data.summary || null;
+				latest = data;
+			} );
+			// Each response's findings cover every viewport stored for the page so far.
+			cache.findings = latest && latest.findings ? latest.findings : [];
+
+			var base = profiler.data && profiler.data.page && sameUrl( profiler.data.page.url, url ) ? profiler.data : null;
+			var data = {
+				page: base ? $.extend( {}, base.page ) : { url: url, label: '', fetched_at: Math.round( Date.now() / 1000 ) },
+				summary: base ? $.extend( {}, base.summary ) : {},
+				findings: base ? base.findings : [],
+				baseline: base ? base.baseline : null
+			};
+			data.page.lab = $.extend( {}, base && base.page.lab, cache.lab );
+			data.findings = mergeFindings( withoutLabFindings( data.findings ), cache.findings );
+
+			profiler.activeTab = 'lab';
+			profiler.tabChosen = true;
+			profiler.labView = results.mobile ? 'mobile' : 'desktop';
+			profiler.rememberUrl( url );
+			profiler.show( data, false );
+
+			// A page measured here belongs in the picker too.
+			api.post( 'perf_pages' ).done( function ( pages ) {
+				if ( pages && pages.success ) {
+					profiler.pages = pages.data;
+					profiler.fillPicker();
+				}
+			} );
+		},
+
+		// A re-profile replaces the stored report (and its lab data): put back what this session measured.
+		attachLabCache: function ( data ) {
+			var cached = profiler.labCache[ profiler.urlKey( data.page && data.page.url ) ];
+			if ( ! cached ) {
+				return;
+			}
+			var page = data.page;
+			page.lab = page.lab && 'object' === typeof page.lab && ! Array.isArray( page.lab ) ? page.lab : {};
+			Object.keys( cached.lab ).forEach( function ( viewport ) {
+				if ( ! page.lab[ viewport ] ) {
+					page.lab[ viewport ] = cached.lab[ viewport ];
+				}
+			} );
+			var hasLabFindings = ( data.findings || [] ).some( function ( item ) {
+				return 'lab' === item.source;
+			} );
+			if ( ! hasLabFindings && cached.findings.length ) {
+				data.findings = mergeFindings( data.findings, cached.findings );
+			}
+		},
+
+		// The lab results of a page, per viewport: the report plus its compact summary.
+		labViews: function ( page ) {
+			var views = {};
+			var key = profiler.urlKey( page.url );
+			var cached = profiler.labCache[ key ];
+			var stored = profiler.data && profiler.data.summary && profiler.data.summary.lab && 'object' === typeof profiler.data.summary.lab ? profiler.data.summary.lab : {};
+			[ 'mobile', 'desktop' ].forEach( function ( viewport ) {
+				if ( page.lab && page.lab[ viewport ] && 'object' === typeof page.lab[ viewport ] ) {
+					views[ viewport ] = { lab: page.lab[ viewport ], summary: ( cached && cached.summary[ viewport ] ) || stored[ viewport ] || null };
+				}
+			} );
+			return views;
+		},
+
+		// Nothing but the lab test has run for this page: no server profile, no HTML analysis.
+		isLabOnly: function ( page ) {
+			return ! page.profile && ! page.html && ! page.http;
 		},
 
 		runPsi: function () {
@@ -1527,17 +3122,34 @@
 				profiler.blobUrl = '';
 			}
 
-			var page = data.page || {};
+			data.page = data.page || {};
+			profiler.attachLabCache( data );
+			var page = data.page;
 			var summary = data.summary || {};
+			var labOnly = profiler.isLabOnly( page );
 			$( '#blt-profiler-status' ).empty();
 
+			// A page that only has lab data shows just the Lab tab; a measured page opens on it first.
+			profiler.tabs = labOnly ? [ 'lab' ] : TABS;
+			if ( labOnly ) {
+				profiler.activeTab = 'lab';
+			} else if ( ! profiler.tabChosen && Object.keys( profiler.labViews( page ) ).length ) {
+				profiler.activeTab = 'lab';
+			} else if ( 'lab' === profiler.activeTab && ! Object.keys( profiler.labViews( page ) ).length ) {
+				profiler.activeTab = 'components';
+			}
+
 			var html = '<div class="blt-card blt-perf-pagecard">' + profiler.headerHtml( page ) + '<div class="blt-card-body">';
-			html += profiler.noticesHtml( page );
-			html += '<div class="blt-stats blt-perf-summary">' + profiler.tilesHtml( page, summary ) + '</div>';
-			if ( data.baseline ) {
-				html += profiler.compareHtml( summary, data.baseline );
-			} else if ( compareRequested ) {
-				html += '<div class="blt-stack-top">' + callout( '', t( 'compareFailed' ), '' ) + '</div>';
+			if ( labOnly ) {
+				html += callout( t( 'labOnlyTitle' ), t( 'labOnlyHint' ), '' );
+			} else {
+				html += profiler.noticesHtml( page );
+				html += '<div class="blt-stats blt-perf-summary">' + profiler.tilesHtml( page, summary ) + '</div>';
+				if ( data.baseline ) {
+					html += profiler.compareHtml( summary, data.baseline );
+				} else if ( compareRequested ) {
+					html += '<div class="blt-stack-top">' + callout( '', t( 'compareFailed' ), '' ) + '</div>';
+				}
 			}
 			html += '</div></div>';
 
@@ -1573,13 +3185,19 @@
 					meta.push( tf( 'templateIs', page.profile.context.template ) );
 				}
 			}
-			if ( page.fetched_at ) {
+			if ( profiler.isLabOnly( page ) ) {
+				var measuredAt = 0;
+				[ 'mobile', 'desktop' ].forEach( function ( viewport ) {
+					measuredAt = Math.max( measuredAt, Number( page.lab && page.lab[ viewport ] && page.lab[ viewport ].measured_at ) || 0 );
+				} );
+				meta.push( tf( 'labMeasuredAt', fmtDate( measuredAt || page.fetched_at ) ) );
+			} else if ( page.fetched_at ) {
 				meta.push( tf( 'profiledAt', fmtDate( page.fetched_at ) ) );
 			}
 			if ( meta.length ) {
 				html += '<p>' + escapeHtml( meta.join( ' · ' ) ) + '</p>';
 			}
-			html += '<div class="blt-card-header-badges">' + scan.statusBadge( http.status );
+			html += '<div class="blt-card-header-badges">' + ( profiler.isLabOnly( page ) ? '' : scan.statusBadge( http.status ) );
 			if ( page.tweaks_off ) {
 				html += badge( t( 'tweaksOff' ) );
 			}
@@ -1714,22 +3332,22 @@
 
 		tabsHtml: function ( page ) {
 			var html = '<div class="blt-card blt-perf-details"><div class="blt-perf-subtabs blt-settings-tabs" role="tablist" aria-label="' + escapeHtml( t( 'detailsLabel' ) ) + '">';
-			TABS.forEach( function ( id ) {
+			profiler.tabs.forEach( function ( id ) {
 				var count = profiler.tabCount( id, page );
 				html += '<button type="button" role="tab" class="blt-settings-tab blt-perf-subtab" id="blt-tab-' + id + '" data-tab="' + id + '" aria-controls="blt-panel-' + id + '" aria-selected="false" tabindex="-1">' +
 					escapeHtml( t( 'tab_' + id ) ) + ( null !== count ? ' <span class="blt-perf-tab-count">' + escapeHtml( num( count ) ) + '</span>' : '' ) + '</button>';
 			} );
 			html += '</div>';
-			TABS.forEach( function ( id ) {
+			profiler.tabs.forEach( function ( id ) {
 				html += '<div role="tabpanel" class="blt-card-body blt-perf-panel" id="blt-panel-' + id + '" aria-labelledby="blt-tab-' + id + '" tabindex="0" hidden></div>';
 			} );
 			return html + '</div>';
 		},
 
 		selectTab: function ( id, focus ) {
-			if ( TABS.indexOf( id ) < 0 ) {
-				id = 'components';
-			}
+			if ( profiler.tabs.indexOf( id ) < 0 ) {
+					id = profiler.tabs[ 0 ];
+				}
 			profiler.activeTab = id;
 			$( '#blt-profiler-result .blt-perf-subtab' ).each( function () {
 				var active = $( this ).attr( 'data-tab' ) === id;
@@ -1749,25 +3367,62 @@
 
 		// Arrow keys move between tabs (roving tabindex).
 		tabKeys: function ( event ) {
-			var index = TABS.indexOf( $( this ).attr( 'data-tab' ) );
+			var tabs = profiler.tabs;
+			var index = tabs.indexOf( $( this ).attr( 'data-tab' ) );
 			var target = -1;
 			if ( 37 === event.which ) {
-				target = ( index + TABS.length - 1 ) % TABS.length;
+				target = ( index + tabs.length - 1 ) % tabs.length;
 			} else if ( 39 === event.which ) {
-				target = ( index + 1 ) % TABS.length;
+				target = ( index + 1 ) % tabs.length;
 			} else if ( 36 === event.which ) {
 				target = 0;
 			} else if ( 35 === event.which ) {
-				target = TABS.length - 1;
+				target = tabs.length - 1;
 			}
 			if ( target >= 0 ) {
 				event.preventDefault();
-				profiler.selectTab( TABS[ target ], true );
+				profiler.selectTab( tabs[ target ], true );
 			}
 		},
 
 		unavailable: function ( page ) {
 			return callout( t( 'profileUnavailable' ), profiler.profileErrorText( page.profile_error || 'not_received' ), 'is-warning' );
+		},
+
+		/* --- Panel: lab (Core Web Vitals) -------------------------------- */
+
+		panel_lab: function ( page ) {
+			var views = profiler.labViews( page );
+			var available = Object.keys( views );
+			if ( ! available.length ) {
+				return emptyState( t( 'labEmptyTitle' ), t( 'labEmptyHint' ) );
+			}
+			var active = views[ profiler.labView ] ? profiler.labView : available[ 0 ];
+			var view = views[ active ];
+			var lab = view.lab;
+			var html = '<div class="blt-lab-bar-row">';
+
+			if ( available.length > 1 ) {
+				html += '<div class="blt-lab-switch" role="group" aria-label="' + escapeHtml( t( 'labDevice' ) ) + '">';
+				[ 'mobile', 'desktop' ].forEach( function ( viewport ) {
+					if ( views[ viewport ] ) {
+						html += '<button type="button" class="button' + ( viewport === active ? ' is-active' : '' ) + '" data-view="' + viewport + '" aria-pressed="' + ( viewport === active ? 'true' : 'false' ) + '">' +
+							escapeHtml( 'mobile' === viewport ? t( 'strategyMobile' ) : t( 'strategyDesktop' ) ) + '</button>';
+					}
+				} );
+				html += '</div>';
+			}
+
+			var meta = [ 'mobile' === active ? t( 'strategyMobile' ) : t( 'strategyDesktop' ) ];
+			if ( lab.viewport && lab.viewport.w ) {
+				meta.push( lab.viewport.w + ' × ' + lab.viewport.h + ( Number( lab.viewport.dpr ) > 1 ? ' @' + lab.viewport.dpr + '×' : '' ) );
+			}
+			if ( lab.measured_at ) {
+				meta.push( tf( 'labMeasuredAt', fmtDate( lab.measured_at ) ) );
+			}
+			html += '<span class="blt-lab-meta">' + escapeHtml( meta.join( ' · ' ) ) + '</span></div>';
+
+			return html + labui.viewHtml( lab, view.summary );
 		},
 
 		/* --- Panel: components ------------------------------------------- */

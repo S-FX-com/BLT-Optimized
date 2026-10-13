@@ -2335,6 +2335,9 @@
 						}
 					}, 1200 );
 				} );
+			} else if ( 'failed' === progress.status ) {
+				$( '#blt-perf-progress' ).prop( 'hidden', true );
+				scan.notice( progress.label || t( 'error' ), 'is-error' );
 			} else {
 				$( '#blt-perf-progress' ).prop( 'hidden', true );
 				scan.notice( t( 'scanCancelled' ) );

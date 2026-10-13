@@ -1178,7 +1178,9 @@ class BLT_Optimized_Health_Checks {
 						'label'       => __( 'Delete cron hook', 'blt-optimized' ),
 						'action'      => 'delete_cron_hook',
 						'args'        => array( 'hook' => $hook ),
-						'destructive' => false,
+						// Unscheduled events can't be restored, and the fix
+						// dispatcher requires the backup acknowledgement for it.
+						'destructive' => true,
 						'confirm'     => sprintf(
 							/* translators: %s: hook name. */
 							__( 'Remove every scheduled event for “%s”? Nothing currently handles it. If its plugin is reactivated later, it will schedule the hook again by itself.', 'blt-optimized' ),

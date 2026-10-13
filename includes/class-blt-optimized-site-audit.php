@@ -196,7 +196,14 @@ class BLT_Optimized_Site_Audit {
 		$deadline = microtime( true ) + (float) apply_filters( 'blt_optimized_perf_tick_budget', self::TICK_BUDGET );
 
 		while ( 'running' === $state['status'] && microtime( true ) < $deadline ) {
-			$step = isset( $state['steps'][ $state['step'] ] ) ? $state['steps'][ $state['step'] ] : 'compile';
+			if ( ! isset( $state['steps'][ $state['step'] ] ) ) {
+				// Past the last step without a compiled report: never loop
+				// back into compile, end the scan as failed.
+				$state = $this->fail( $state, __( 'The scan ended without compiling a report.', 'blt-optimized' ) );
+				$this->save_state( $state );
+				break;
+			}
+			$step = $state['steps'][ $state['step'] ];
 
 			// The browser runs the lab step; the server just waits for it.
 			if ( 'lab' === $step ) {
@@ -230,15 +237,39 @@ class BLT_Optimized_Site_Audit {
 						break;
 				}
 			} catch ( \Throwable $e ) {
-				// One failing check must not sink the whole scan: record it,
-				// skip the step, and keep going.
 				$state['errors'][] = sprintf( '%s: %s', $step, $e->getMessage() );
-				$state             = $this->next_step( $state );
+				if ( 'compile' === $step ) {
+					// Nothing left to skip to: retrying would fail the same way.
+					$state = $this->fail(
+						$state,
+						/* translators: %s: error message. */
+						sprintf( __( 'The report could not be compiled: %s', 'blt-optimized' ), $e->getMessage() )
+					);
+				} else {
+					// One failing check must not sink the whole scan: record
+					// it, skip the step, and keep going.
+					$state = $this->next_step( $state );
+				}
 			}
 
 			$this->save_state( $state );
 		}
 
+		return $state;
+	}
+
+	/**
+	 * End the scan as failed (terminal, like completed or cancelled).
+	 *
+	 * @param array  $state State.
+	 * @param string $label Message for the progress label.
+	 * @return array
+	 */
+	private function fail( array $state, $label ) {
+		$state['status']      = 'failed';
+		$state['finished_at'] = time();
+		$state['label']       = $label;
+		delete_option( self::LAB_OPTION );
 		return $state;
 	}
 

@@ -997,7 +997,8 @@ class BLT_Optimized_Cleaner {
 			$total += $this->batched_delete_by_ids(
 				"SELECT l.log_id FROM {$tables['logs']} l LEFT JOIN {$tables['actions']} a ON a.action_id = l.action_id WHERE a.action_id IS NULL",
 				$tables['logs'],
-				'log_id'
+				'log_id',
+				$deadline
 			);
 		}
 
@@ -1106,9 +1107,10 @@ class BLT_Optimized_Cleaner {
 	 * @param string $select_sql SELECT returning primary key values (no LIMIT).
 	 * @param string $table      Table to delete from.
 	 * @param string $pk         Primary key column.
+	 * @param float  $deadline   microtime() to stop by (0 = run until done).
 	 * @return int Rows deleted.
 	 */
-	private function batched_delete_by_ids( $select_sql, $table, $pk ) {
+	private function batched_delete_by_ids( $select_sql, $table, $pk, $deadline = 0.0 ) {
 		global $wpdb;
 		$total = 0;
 		do {
@@ -1121,7 +1123,7 @@ class BLT_Optimized_Cleaner {
 			$deleted = (int) $wpdb->query( "DELETE FROM {$table} WHERE {$pk} IN ({$id_list})" );
 			// phpcs:enable
 			$total += $deleted;
-		} while ( count( $ids ) === self::BATCH_SIZE && $deleted > 0 );
+		} while ( count( $ids ) === self::BATCH_SIZE && $deleted > 0 && ( ! $deadline || microtime( true ) < $deadline ) );
 		return $total;
 	}
 

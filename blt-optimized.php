@@ -24,6 +24,54 @@ define( 'BLT_OPTIMIZED_URL', plugin_dir_url( __FILE__ ) );
 define( 'BLT_OPTIMIZED_BASENAME', plugin_basename( __FILE__ ) );
 
 /**
+ * Autoloader for the performance-scan classes.
+ *
+ * Maps BLT_Optimized_Foo_Bar to includes/class-blt-optimized-foo-bar.php. The
+ * performance scan's modules are large and almost entirely admin-side, so they
+ * are loaded on first use instead of up front: a visitor's page view never
+ * parses the auditors, the findings rules or the PageSpeed client. The
+ * original disk/DB classes keep their explicit require_once calls below.
+ */
+spl_autoload_register(
+	static function ( $class ) {
+		if ( 0 !== strpos( $class, 'BLT_Optimized_' ) ) {
+			return;
+		}
+		$file = BLT_OPTIMIZED_DIR . 'includes/class-' . strtolower( str_replace( '_', '-', $class ) ) . '.php';
+		if ( is_readable( $file ) ) {
+			require_once $file;
+		}
+	}
+);
+
+/**
+ * Bricks Builder support (Bricks parent theme only).
+ *
+ * The slug is read from the `template` option, which is available here; the
+ * BRICKS_VERSION constant is not defined until the theme loads. The callbacks
+ * are plain class/method names, so BLT_Optimized_Bricks is only loaded when a
+ * hook fires (a scan being compiled, or a "content contains" asset rule being
+ * evaluated) and never on other requests, nor on sites without Bricks.
+ */
+if ( 'bricks' === get_template() ) {
+	add_filter( 'blt_optimized_perf_findings', array( 'BLT_Optimized_Bricks', 'filter_findings' ), 10, 2 );
+	add_filter( 'blt_optimized_asset_markers', array( 'BLT_Optimized_Bricks', 'filter_asset_markers' ) );
+	add_filter( 'blt_optimized_rule_meta_keys', array( 'BLT_Optimized_Bricks', 'filter_rule_meta_keys' ) );
+	add_filter( 'blt_optimized_rule_haystack', array( 'BLT_Optimized_Bricks', 'filter_rule_haystack' ), 10, 2 );
+}
+
+/**
+ * Front-end profiler gate.
+ *
+ * Started before anything else so a profiled request's timing and plugin-load
+ * measurements begin as early as a regular plugin can. On every request that
+ * does not carry a one-time profile token this is a single isset() check; the
+ * instrumentation itself is only loaded when a token is present.
+ */
+require_once BLT_OPTIMIZED_DIR . 'includes/class-blt-optimized-profiler.php';
+BLT_Optimized_Profiler::maybe_start();
+
+/**
  * BLT family shared settings layer.
  *
  * A drop-in library vendored byte-identical into every BLT plugin; the newest
@@ -53,7 +101,7 @@ require_once BLT_OPTIMIZED_DIR . 'includes/class-blt-optimized-audit-log.php';
 require_once BLT_OPTIMIZED_DIR . 'includes/class-blt-optimized-scanner.php';
 require_once BLT_OPTIMIZED_DIR . 'includes/class-blt-optimized-cleaner.php';
 require_once BLT_OPTIMIZED_DIR . 'includes/class-blt-optimized-db-optimizer.php';
-require_once BLT_OPTIMIZED_DIR . 'includes/class-blt-optimized-admin.php';
+// BLT_Optimized_Admin is autoloaded: it is only constructed in wp-admin.
 
 /**
  * Image-optimization module (optional).
@@ -76,7 +124,7 @@ define( 'BLT_OPTIMIZER_BASENAME', BLT_OPTIMIZED_BASENAME );
  *
  * Maps BltImageOptimizer\Foo_Bar to includes/images/class-blt-foo-bar.php,
  * falling back to admin/images/. Only the image module uses this namespace;
- * the disk/DB core is un-namespaced and loaded via the require_once calls above.
+ * the core is un-namespaced (see the BLT_Optimized_ autoloader above).
  */
 spl_autoload_register(
 	function ( $class ) {
@@ -177,6 +225,16 @@ if ( file_exists( BLT_OPTIMIZED_DIR . 'plugin-update-checker/plugin-update-check
 
 /**
  * Main plugin bootstrap.
+ *
+ * The performance-scan modules are created on first access, so requests that
+ * never touch them (every front-end page view) never load their classes:
+ *
+ * @property-read BLT_Optimized_Health_Checks $health
+ * @property-read BLT_Optimized_Page_Auditor  $page_auditor
+ * @property-read BLT_Optimized_Media_Auditor $media_auditor
+ * @property-read BLT_Optimized_PSI           $psi
+ * @property-read BLT_Optimized_Fixes         $fixes
+ * @property-read BLT_Optimized_Site_Audit    $site_audit
  */
 final class BLT_Optimized {
 
@@ -214,9 +272,26 @@ final class BLT_Optimized {
 	public $audit_log;
 
 	/**
-	 * @var BLT_Optimized_Admin
+	 * Speed tweaks + asset rules (front-end runtime; always constructed).
+	 *
+	 * @var BLT_Optimized_Tweaks
+	 */
+	public $tweaks;
+
+	/**
+	 * Admin screens. Null outside wp-admin (including admin-ajax/admin-post,
+	 * which are wp-admin requests).
+	 *
+	 * @var BLT_Optimized_Admin|null
 	 */
 	public $admin;
+
+	/**
+	 * Lazily created performance-scan modules, by property name.
+	 *
+	 * @var array<string,object>
+	 */
+	private $modules = array();
 
 	/**
 	 * Get the singleton.
@@ -238,7 +313,15 @@ final class BLT_Optimized {
 		$this->scanner      = new BLT_Optimized_Scanner( $this->audit_log );
 		$this->cleaner      = new BLT_Optimized_Cleaner( $this->audit_log );
 		$this->db_optimizer = new BLT_Optimized_DB_Optimizer( $this->audit_log );
-		$this->admin        = new BLT_Optimized_Admin( $this );
+
+		// Speed tweaks + asset rules act on front-end requests; with nothing
+		// switched on, the constructor registers no hooks. The rest of the
+		// performance scan is created on first use (see __get()).
+		$this->tweaks = new BLT_Optimized_Tweaks();
+
+		if ( is_admin() ) {
+			$this->admin = new BLT_Optimized_Admin( $this );
+		}
 
 		add_action( 'init', array( $this, 'load_textdomain' ) );
 		add_action( 'blt_optimized_scheduled_scan', array( $this->scanner, 'run_scheduled_scan' ) );
@@ -247,6 +330,55 @@ final class BLT_Optimized {
 		add_action( 'update_option_' . self::OPTION_SETTINGS, array( $this, 'maybe_setup_images' ), 10, 2 );
 
 		$this->boot_images();
+	}
+
+	/**
+	 * Create performance-scan modules on first access.
+	 *
+	 * @param string $name Property name.
+	 * @return object|null
+	 */
+	public function __get( $name ) {
+		if ( isset( $this->modules[ $name ] ) ) {
+			return $this->modules[ $name ];
+		}
+
+		switch ( $name ) {
+			case 'health':
+				$module = new BLT_Optimized_Health_Checks( $this->db_optimizer, $this->scanner );
+				break;
+			case 'page_auditor':
+				$module = new BLT_Optimized_Page_Auditor();
+				break;
+			case 'media_auditor':
+				$module = new BLT_Optimized_Media_Auditor( $this->audit_log );
+				break;
+			case 'psi':
+				$module = new BLT_Optimized_PSI();
+				break;
+			case 'fixes':
+				$module = new BLT_Optimized_Fixes( $this );
+				break;
+			case 'site_audit':
+				$module = new BLT_Optimized_Site_Audit( $this );
+				break;
+			default:
+				_doing_it_wrong( __METHOD__, esc_html( sprintf( 'Unknown BLT_Optimized property "%s".', $name ) ), '1.3.0' );
+				return null;
+		}
+
+		$this->modules[ $name ] = $module;
+		return $module;
+	}
+
+	/**
+	 * Lazy modules always "exist".
+	 *
+	 * @param string $name Property name.
+	 * @return bool
+	 */
+	public function __isset( $name ) {
+		return in_array( $name, array( 'health', 'page_auditor', 'media_auditor', 'psi', 'fixes', 'site_audit' ), true );
 	}
 
 	/**
@@ -348,6 +480,10 @@ final class BLT_Optimized {
 			'show_top_menu'      => 1, // Top-level admin menu.
 			'show_tools_menu'    => 0, // Entry under the Tools menu.
 			'enable_images'      => 0, // Optional image-optimization module (off by default).
+			'enable_lab'         => 1, // Built-in lab test: measure pages in the admin's browser during scans (no external service).
+			'enable_psi'         => 0, // Google PageSpeed Insights lab data in the performance scan (off by default: sends URLs to Google).
+			'psi_api_key'        => '',
+			'audit_urls'         => '', // Extra URLs for the performance scan, one per line.
 		);
 		$settings = get_option( self::OPTION_SETTINGS, array() );
 		return wp_parse_args( is_array( $settings ) ? $settings : array(), $defaults );

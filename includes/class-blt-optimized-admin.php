@@ -24,12 +24,20 @@ class BLT_Optimized_Admin {
 	private $plugin;
 
 	/**
+	 * Performance scan screens (Performance Scan, Page Profiler, Speed Tweaks).
+	 *
+	 * @var BLT_Optimized_Perf_Admin
+	 */
+	public $perf;
+
+	/**
 	 * Constructor.
 	 *
 	 * @param BLT_Optimized $plugin Plugin core.
 	 */
 	public function __construct( BLT_Optimized $plugin ) {
 		$this->plugin = $plugin;
+		$this->perf   = new BLT_Optimized_Perf_Admin( $plugin, $this );
 
 		add_action( 'admin_menu', array( $this, 'register_menu' ) );
 		add_action( 'admin_init', array( $this, 'register_settings' ) );
@@ -67,9 +75,12 @@ class BLT_Optimized_Admin {
 	 */
 	private function pages() {
 		return array(
-			'blt-optimized'          => array( __( 'Disk Usage', 'blt-optimized' ), 'render_scan_page' ),
+			'blt-optimized'          => array( __( 'Performance Scan', 'blt-optimized' ), 'render_perf_page' ),
+			'blt-optimized-profiler' => array( __( 'Page Profiler', 'blt-optimized' ), 'render_profiler_page' ),
+			'blt-optimized-tweaks'   => array( __( 'Speed Tweaks', 'blt-optimized' ), 'render_tweaks_page' ),
+			'blt-optimized-disk'     => array( __( 'Disk Usage', 'blt-optimized' ), 'render_scan_page' ),
 			'blt-optimized-cleanup'  => array( __( 'Database Cleanup', 'blt-optimized' ), 'render_cleanup_page' ),
-			'blt-optimized-db'       => array( __( 'Optimization', 'blt-optimized' ), 'render_db_page' ),
+			'blt-optimized-db'       => array( __( 'DB Optimization', 'blt-optimized' ), 'render_db_page' ),
 			'blt-optimized-audit'    => array( __( 'Audit Log', 'blt-optimized' ), 'render_audit_page' ),
 			'blt-optimized-settings' => array( __( 'Settings', 'blt-optimized' ), 'render_settings_page' ),
 		);
@@ -99,7 +110,7 @@ class BLT_Optimized_Admin {
 				__( 'BLT Optimized', 'blt-optimized' ),
 				self::CAPABILITY,
 				'blt-optimized',
-				array( $this, 'render_scan_page' ),
+				array( $this, 'render_perf_page' ),
 				BLT_Family_Brand::menu_icon( BLT_OPTIMIZED_DIR ),
 				81
 			);
@@ -121,7 +132,7 @@ class BLT_Optimized_Admin {
 				__( 'BLT Optimized', 'blt-optimized' ),
 				self::CAPABILITY,
 				'blt-optimized',
-				array( $this, 'render_scan_page' )
+				array( $this, 'render_perf_page' )
 			);
 
 			// If the top-level menu isn't shown, the remaining pages still need
@@ -159,9 +170,12 @@ class BLT_Optimized_Admin {
 	 */
 	public static function nav_tabs() {
 		$tabs = array(
-			'blt-optimized'          => __( 'Disk Usage', 'blt-optimized' ),
+			'blt-optimized'          => __( 'Performance Scan', 'blt-optimized' ),
+			'blt-optimized-profiler' => __( 'Page Profiler', 'blt-optimized' ),
+			'blt-optimized-tweaks'   => __( 'Speed Tweaks', 'blt-optimized' ),
+			'blt-optimized-disk'     => __( 'Disk Usage', 'blt-optimized' ),
 			'blt-optimized-cleanup'  => __( 'Database Cleanup', 'blt-optimized' ),
-			'blt-optimized-db'       => __( 'Optimization', 'blt-optimized' ),
+			'blt-optimized-db'       => __( 'DB Optimization', 'blt-optimized' ),
 			'blt-optimized-audit'    => __( 'Audit Log', 'blt-optimized' ),
 			'blt-optimized-settings' => __( 'Settings', 'blt-optimized' ),
 		);
@@ -376,6 +390,16 @@ class BLT_Optimized_Admin {
 		// Optional image-optimization module.
 		$clean['enable_images'] = empty( $input['enable_images'] ) ? 0 : 1;
 
+		// Performance scan: built-in lab test, opt-in PageSpeed Insights, extra URLs.
+		$clean['enable_lab'] = empty( $input['enable_lab'] ) ? 0 : 1;
+		$clean['enable_psi'] = empty( $input['enable_psi'] ) ? 0 : 1;
+		if ( isset( $input['psi_api_key'] ) ) {
+			$clean['psi_api_key'] = preg_replace( '/[^A-Za-z0-9_\-]/', '', (string) $input['psi_api_key'] );
+		}
+		if ( isset( $input['audit_urls'] ) ) {
+			$clean['audit_urls'] = $this->sanitize_audit_urls( $input['audit_urls'] );
+		}
+
 		// Guarantee the plugin stays reachable from at least one menu.
 		if ( ! $clean['show_top_menu'] && ! $clean['show_tools_menu'] ) {
 			$clean['show_top_menu'] = 1;
@@ -384,14 +408,33 @@ class BLT_Optimized_Admin {
 		return $clean;
 	}
 
+	/**
+	 * Keep only absolute http(s) URLs on this site, one per line, max 5
+	 * (the scan profiles at most 8 pages, automatic samples included).
+	 *
+	 * @param string $raw Textarea input.
+	 * @return string
+	 */
+	private function sanitize_audit_urls( $raw ) {
+		$urls = array();
+		foreach ( preg_split( '/[\r\n]+/', (string) $raw ) as $line ) {
+			$url = esc_url_raw( trim( $line ), array( 'http', 'https' ) );
+			if ( '' !== $url && BLT_Optimized_Components::is_local_host( BLT_Optimized_Components::url_host( $url ) ) && '' !== BLT_Optimized_Components::url_host( $url ) ) {
+				$urls[] = $url;
+			}
+		}
+		return implode( "\n", array_slice( array_unique( $urls ), 0, 5 ) );
+	}
+
 	/* ------------------------------------------------------------------ */
 	/* AJAX: scanning                                                      */
 	/* ------------------------------------------------------------------ */
 
 	/**
-	 * Verify capability + nonce for AJAX requests.
+	 * Verify capability + nonce for AJAX requests. Public so the performance
+	 * screens share the same gate.
 	 */
-	private function verify_ajax() {
+	public function verify_ajax() {
 		if ( ! current_user_can( self::CAPABILITY ) ) {
 			wp_send_json_error( array( 'message' => __( 'Insufficient permissions.', 'blt-optimized' ) ), 403 );
 		}
@@ -565,18 +608,7 @@ class BLT_Optimized_Admin {
 
 		$category = isset( $_POST['category'] ) ? sanitize_key( wp_unslash( $_POST['category'] ) ) : '';
 
-		if ( ! $this->backup_acked() ) {
-			if ( empty( $_POST['backup_ack'] ) ) {
-				wp_send_json_error(
-					array(
-						'code'    => 'backup_ack_required',
-						'message' => __( 'Please acknowledge that you have a recent backup before running deletions.', 'blt-optimized' ),
-					)
-				);
-			}
-			set_transient( $this->backup_ack_key(), 1, 12 * HOUR_IN_SECONDS );
-			$this->plugin->audit_log->log( 'backup_acknowledged', __( 'User acknowledged having a recent backup before bulk deletion.', 'blt-optimized' ) );
-		}
+		$this->ensure_backup_ack();
 
 		$result = $this->plugin->cleaner->execute( $category );
 		if ( is_wp_error( $result ) ) {
@@ -593,11 +625,34 @@ class BLT_Optimized_Admin {
 	}
 
 	/**
+	 * Require the once-per-session backup acknowledgement before a deletion.
+	 * Records it when this request carries `backup_ack`; otherwise ends the
+	 * request with a `backup_ack_required` JSON error. Call after verify_ajax().
+	 *
+	 * @return void
+	 */
+	public function ensure_backup_ack() {
+		if ( $this->backup_acked() ) {
+			return;
+		}
+		if ( empty( $_POST['backup_ack'] ) ) { // phpcs:ignore WordPress.Security.NonceVerification.Missing -- Callers run verify_ajax() first.
+			wp_send_json_error(
+				array(
+					'code'    => 'backup_ack_required',
+					'message' => __( 'Please acknowledge that you have a recent backup before running deletions.', 'blt-optimized' ),
+				)
+			);
+		}
+		set_transient( $this->backup_ack_key(), 1, 12 * HOUR_IN_SECONDS );
+		$this->plugin->audit_log->log( 'backup_acknowledged', __( 'User acknowledged having a recent backup before bulk deletion.', 'blt-optimized' ) );
+	}
+
+	/**
 	 * Whether the current user has acknowledged the backup prompt recently.
 	 *
 	 * @return bool
 	 */
-	private function backup_acked() {
+	public function backup_acked() {
 		return (bool) get_transient( $this->backup_ack_key() );
 	}
 
@@ -690,7 +745,7 @@ class BLT_Optimized_Admin {
 		header( 'Content-Disposition: attachment; filename="blt-optimized-disk-scan-' . gmdate( 'Ymd-His' ) . '.csv"' );
 
 		$out = fopen( 'php://output', 'w' ); // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_fopen
-		fputcsv( $out, array( 'path', 'type', 'depth', 'size_bytes', 'size_human', 'file_count', 'flags', 'scanned_at_utc' ) );
+		fputcsv( $out, array( 'path', 'type', 'depth', 'size_bytes', 'size_human', 'file_count', 'flags', 'scanned_at_utc' ), ',', '"', '\\' );
 		foreach ( $rows as $row ) {
 			fputcsv(
 				$out,
@@ -703,7 +758,10 @@ class BLT_Optimized_Admin {
 					$row['file_count'],
 					$row['flags'],
 					$row['scanned_at'],
-				)
+				),
+				',',
+				'"',
+				'\\'
 			);
 		}
 		fclose( $out ); // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_fclose
@@ -736,6 +794,27 @@ class BLT_Optimized_Admin {
 	}
 
 	/**
+	 * Performance Scan page (the plugin's landing screen).
+	 */
+	public function render_perf_page() {
+		$this->perf->render_perf_page();
+	}
+
+	/**
+	 * Page Profiler page.
+	 */
+	public function render_profiler_page() {
+		$this->perf->render_profiler_page();
+	}
+
+	/**
+	 * Speed Tweaks page.
+	 */
+	public function render_tweaks_page() {
+		$this->perf->render_tweaks_page();
+	}
+
+	/**
 	 * Disk usage page.
 	 */
 	public function render_scan_page() {
@@ -758,7 +837,7 @@ class BLT_Optimized_Admin {
 					<span id="blt-scan-progress" class="blt-scan-status"></span>
 				</div>
 			</div>
-			<?php $this->render_nav_tabs( 'blt-optimized' ); ?>
+			<?php $this->render_nav_tabs( 'blt-optimized-disk' ); ?>
 			<p class="description">
 				<?php esc_html_e( 'Folder-by-folder breakdown of wp-content, with known space hogs flagged. wp-admin and wp-includes are reported as single reference figures.', 'blt-optimized' ); ?>
 				<?php if ( $du ) : ?>
@@ -995,6 +1074,58 @@ class BLT_Optimized_Admin {
 								<span class="blt-toggle-desc"><?php esc_html_e( 'Adds Image Optimizer, Image Settings, and Image Log pages to this menu. Requires a self-hosted Cloudflare Worker (configure it under Image Settings). Leaving this off keeps BLT Optimized fully standalone with no external dependency.', 'blt-optimized' ); ?></span>
 							</span>
 						</label>
+					</div>
+				</div>
+
+				<div class="blt-card">
+					<div class="blt-card-header">
+						<h2><?php esc_html_e( 'Performance scan', 'blt-optimized' ); ?></h2>
+						<p><?php esc_html_e( 'The performance scan profiles a sample of your pages automatically (front page, a post, a page, an archive, shop pages). Add important pages here so they are always included.', 'blt-optimized' ); ?></p>
+					</div>
+					<div class="blt-card-body">
+						<div class="blt-field">
+							<div class="blt-field-label"><label for="blt-audit-urls"><?php esc_html_e( 'Extra pages to scan', 'blt-optimized' ); ?></label></div>
+							<div>
+								<textarea id="blt-audit-urls" name="<?php echo esc_attr( BLT_Optimized::OPTION_SETTINGS ); ?>[audit_urls]" rows="4" class="large-text code" placeholder="<?php echo esc_attr( home_url( '/contact/' ) ); ?>"><?php echo esc_textarea( $settings['audit_urls'] ); ?></textarea>
+								<p class="blt-field-desc"><?php esc_html_e( 'Full URLs on this site, one per line (up to 5). These are always included; automatic samples fill the remaining slots.', 'blt-optimized' ); ?></p>
+							</div>
+						</div>
+						<div class="blt-field">
+							<div class="blt-field-label"><?php esc_html_e( 'Lab test', 'blt-optimized' ); ?></div>
+							<div>
+								<label class="blt-toggle">
+									<input type="checkbox" name="<?php echo esc_attr( BLT_Optimized::OPTION_SETTINGS ); ?>[enable_lab]" value="1" <?php checked( ! empty( $settings['enable_lab'] ) ); ?> />
+									<span class="blt-toggle-track" aria-hidden="true"><span class="blt-toggle-thumb"></span></span>
+									<span class="blt-toggle-text">
+										<span class="blt-toggle-label"><?php esc_html_e( 'Measure Core Web Vitals in your browser during scans', 'blt-optimized' ); ?></span>
+										<span class="blt-toggle-desc"><?php esc_html_e( 'Loads each scanned page in a frame on the scan screen and reads the browser\'s own performance data: LCP and its element, layout shifts, blocking time per script, render-blocking files, unused CSS and oversized images. No API key or outside service, and it works on local and staging sites. Timings are unthrottled, so they come out faster than PageSpeed\'s simulated phone.', 'blt-optimized' ); ?></span>
+									</span>
+								</label>
+							</div>
+						</div>
+						<div class="blt-field">
+							<div class="blt-field-label"><?php esc_html_e( 'PageSpeed Insights', 'blt-optimized' ); ?></div>
+							<div>
+								<label class="blt-toggle">
+									<input type="checkbox" name="<?php echo esc_attr( BLT_Optimized::OPTION_SETTINGS ); ?>[enable_psi]" value="1" <?php checked( ! empty( $settings['enable_psi'] ) ); ?> />
+									<span class="blt-toggle-track" aria-hidden="true"><span class="blt-toggle-thumb"></span></span>
+									<span class="blt-toggle-text">
+										<span class="blt-toggle-label"><?php esc_html_e( 'Include Google PageSpeed Insights lab data', 'blt-optimized' ); ?></span>
+										<span class="blt-toggle-desc"><?php esc_html_e( 'Adds real Lighthouse metrics (LCP, CLS, TBT) and unused-JavaScript/CSS measurements per plugin. Sends your page URLs to Google; the site must be publicly reachable. Off by default.', 'blt-optimized' ); ?></span>
+									</span>
+								</label>
+							</div>
+						</div>
+						<div class="blt-field">
+							<div class="blt-field-label"><label for="blt-psi-key"><?php esc_html_e( 'PageSpeed API key', 'blt-optimized' ); ?></label></div>
+							<div>
+								<input type="password" autocomplete="off" id="blt-psi-key" name="<?php echo esc_attr( BLT_Optimized::OPTION_SETTINGS ); ?>[psi_api_key]" value="<?php echo esc_attr( $settings['psi_api_key'] ); ?>" class="regular-text" />
+								<p class="blt-field-desc">
+									<?php esc_html_e( 'Effectively required: Google\'s shared keyless quota is usually exhausted, so requests without a key fail. The key is free and only needs the PageSpeed Insights API enabled.', 'blt-optimized' ); ?>
+									<a href="https://developers.google.com/speed/docs/insights/v5/get-started" target="_blank" rel="noopener noreferrer"><?php esc_html_e( 'Get a free key', 'blt-optimized' ); ?></a>
+								</p>
+							</div>
+						</div>
 					</div>
 				</div>
 

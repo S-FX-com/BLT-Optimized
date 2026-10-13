@@ -1404,7 +1404,8 @@
 	color: var(--blt-muted-fg);
 }
 
-.blt-ui .blt-card-body > .blt-lab-metrics + .blt-lab-caveat {
+/* In the scan report the caveat is the last thing in its card. */
+.blt-ui #blt-perf-lab .blt-lab-caveat {
 	margin-bottom: 0;
 }
 

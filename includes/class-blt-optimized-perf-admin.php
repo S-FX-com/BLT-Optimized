@@ -873,12 +873,12 @@ class BLT_Optimized_Perf_Admin {
 		if ( is_wp_error( $page ) ) {
 			wp_send_json_error( array( 'message' => $page->get_error_message() ) );
 		}
-		$this->plugin->site_audit->remember_page( $page );
+		$page = $this->plugin->site_audit->remember_page( $page );
 
 		$payload = array(
 			'page'     => $page,
 			'summary'  => $this->plugin->site_audit->page_summary( $page ),
-			'findings' => BLT_Optimized_Findings::sort( BLT_Optimized_Page_Findings::analyze( array( $page ) ) ),
+			'findings' => $this->page_findings( $page ),
 		);
 
 		if ( $compare ) {
@@ -889,6 +889,21 @@ class BLT_Optimized_Perf_Admin {
 		}
 
 		wp_send_json_success( $payload );
+	}
+
+	/**
+	 * Server-side and (when measured) lab findings for one page report.
+	 *
+	 * @param array $page Page report.
+	 * @return array[]
+	 */
+	private function page_findings( array $page ) {
+		return BLT_Optimized_Findings::sort(
+			array_merge(
+				BLT_Optimized_Page_Findings::analyze( array( $page ) ),
+				empty( $page['lab'] ) ? array() : BLT_Optimized_Lab::findings( array( $page ) )
+			)
+		);
 	}
 
 	/**
@@ -932,7 +947,7 @@ class BLT_Optimized_Perf_Admin {
 			array(
 				'page'     => $page,
 				'summary'  => $this->plugin->site_audit->page_summary( $page ),
-				'findings' => BLT_Optimized_Findings::sort( BLT_Optimized_Page_Findings::analyze( array( $page ) ) ),
+				'findings' => $this->page_findings( $page ),
 			)
 		);
 	}

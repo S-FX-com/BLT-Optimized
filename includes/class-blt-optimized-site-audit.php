@@ -676,11 +676,24 @@ class BLT_Optimized_Site_Audit {
 	 * Remember a page profiled on demand (Page Profiler) next to the scan's.
 	 *
 	 * @param array $page Page report.
-	 * @return void
+	 * @return array The stored page report (with any earlier lab results).
 	 */
 	public function remember_page( array $page ) {
-		$pages                        = $this->get_pages();
+		$pages = $this->get_pages();
+
+		// A re-profile replaces the server measurements but keeps the lab
+		// results the browser measured for the same page.
+		foreach ( $pages as $key => $stored ) {
+			if ( self::same_url( $stored['url'], $page['url'] ) ) {
+				if ( empty( $page['lab'] ) && ! empty( $stored['lab'] ) ) {
+					$page['lab'] = $stored['lab'];
+				}
+				unset( $pages[ $key ] );
+			}
+		}
+
 		$pages[ md5( $page['url'] ) ] = $page;
 		update_option( self::PAGES_OPTION, array_slice( $pages, -12, null, true ), false );
+		return $page;
 	}
 }

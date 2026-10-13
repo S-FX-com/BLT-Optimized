@@ -96,10 +96,11 @@ class BLT_Optimized_Lab {
 	const LCP_WASTED_MIN_BYTES = 20 * KB_IN_BYTES;
 
 	// CLS.
-	const CLS_MIN_SHARE      = 0.02;
-	const CLS_MAX_FINDINGS   = 4;
-	const CLS_FONT_WINDOW_MS = 400;
-	const CLS_LATE_AFTER_MS  = 300;
+	const CLS_MIN_SHARE       = 0.02;
+	const CLS_MAX_FINDINGS    = 4;
+	const CLS_FONT_WINDOW_MS  = 400;
+	const CLS_ASSET_WINDOW_MS = 500;
+	const CLS_LATE_AFTER_MS   = 300;
 
 	// Images.
 	const OVERSIZED_RATIO        = 1.5;
@@ -2731,7 +2732,7 @@ class BLT_Optimized_Lab {
 			if ( ! is_array( $cls ) || ! in_array( $run['sum']['ratings']['cls'], array( 'needs-improvement', 'poor' ), true ) ) {
 				continue;
 			}
-			foreach ( self::cls_shares( $cls ) as $ekey => $share ) {
+			foreach ( self::cls_shares( $cls, (array) self::g( $run['lab'], 'viewport', array() ) ) as $ekey => $share ) {
 				if ( ! isset( $culprits[ $ekey ] ) ) {
 					$culprits[ $ekey ] = array(
 						'source' => $share['source'],
@@ -2762,7 +2763,8 @@ class BLT_Optimized_Lab {
 			if ( $limit <= count( $findings ) || ( $findings && (float) self::t( 'CLS_MIN_SHARE' ) > $culprit['max'] ) ) {
 				break;
 			}
-			$findings[] = self::cls_finding( $runs, $ekey, $culprit, 0 === count( $findings ) );
+			$is_top     = empty( $findings );
+			$findings[] = self::cls_finding( $runs, $ekey, $culprit, $is_top );
 		}
 		return $findings;
 	}
@@ -2776,10 +2778,11 @@ class BLT_Optimized_Lab {
 	 * nothing changed size, the shift is split between the elements that moved,
 	 * in proportion to area times distance.
 	 *
-	 * @param array $cls CLS block.
+	 * @param array $cls      CLS block.
+	 * @param array $viewport Viewport { w, h } (the browser clips shift rectangles to it).
 	 * @return array<string,array> Element key => { value, count, time, dy, role: size|moved, victims: string[], source }.
 	 */
-	private static function cls_shares( array $cls ) {
+	private static function cls_shares( array $cls, array $viewport = array() ) {
 		$acc = array();
 		$sum = 0.0;
 		foreach ( (array) self::g( $cls, 'shifts', array() ) as $shift ) {
@@ -2798,7 +2801,7 @@ class BLT_Optimized_Lab {
 			$change  = array();
 			$growers = array();
 			foreach ( $sources as $i => $source ) {
-				$change[ $i ] = self::size_change( $source );
+				$change[ $i ] = self::size_change( $source, $viewport );
 				if ( $change[ $i ] > 0 ) {
 					$growers[ $i ] = $change[ $i ];
 				}
@@ -2873,23 +2876,44 @@ class BLT_Optimized_Lab {
 	}
 
 	/**
-	 * By how much (px²) an element's box changed size in a shift; 0 when it
-	 * only moved or the rectangles are unknown. Changes under 2 px either way
-	 * are rounding noise.
+	 * By how much (px²) an element's box really changed size in a shift; 0 when
+	 * it only moved, when either rectangle is empty (it left the viewport), or
+	 * when the change could be an artefact of clipping: the browser clips shift
+	 * rectangles to the viewport, so an element sliding past the bottom edge
+	 * seems to shrink. Changes under 2 px are rounding noise.
 	 *
-	 * @param array $source CLS source.
+	 * @param array $source   CLS source.
+	 * @param array $viewport Viewport { w, h }.
 	 * @return float
 	 */
-	private static function size_change( array $source ) {
+	private static function size_change( array $source, array $viewport = array() ) {
 		$prev = self::g( $source, 'prevRect' );
 		$curr = self::g( $source, 'currRect' );
 		if ( ! is_array( $prev ) || ! is_array( $curr ) || count( $prev ) < 4 || count( $curr ) < 4 ) {
 			return 0.0;
 		}
-		if ( abs( (float) $curr[2] - (float) $prev[2] ) < 2 && abs( (float) $curr[3] - (float) $prev[3] ) < 2 ) {
+		$p = array_map( 'floatval', array_slice( array_values( $prev ), 0, 4 ) );
+		$c = array_map( 'floatval', array_slice( array_values( $curr ), 0, 4 ) );
+		if ( $p[2] <= 0 || $p[3] <= 0 || $c[2] <= 0 || $c[3] <= 0 ) {
 			return 0.0;
 		}
-		return max( 1.0, abs( (float) $curr[2] * (float) $curr[3] - (float) $prev[2] * (float) $prev[3] ) );
+		$vw = self::n( $viewport, 'w', 0 );
+		$vh = self::n( $viewport, 'h', 0 );
+
+		// An edge counts as clipped when the rectangle touches the viewport there.
+		$clipped_y = static function ( $r ) use ( $vh ) {
+			return $r[1] <= 1 || ( $vh > 0 && $r[1] + $r[3] >= $vh - 1 );
+		};
+		$clipped_x = static function ( $r ) use ( $vw ) {
+			return $r[0] <= 1 || ( $vw > 0 && $r[0] + $r[2] >= $vw - 1 );
+		};
+
+		$grew_h = abs( $c[3] - $p[3] ) >= 2 && ! $clipped_y( $p ) && ! $clipped_y( $c );
+		$grew_w = abs( $c[2] - $p[2] ) >= 2 && ! $clipped_x( $p ) && ! $clipped_x( $c );
+		if ( ! $grew_h && ! $grew_w ) {
+			return 0.0;
+		}
+		return max( 1.0, abs( $c[2] * $c[3] - $p[2] * $p[3] ) );
 	}
 
 	/**
@@ -2965,6 +2989,104 @@ class BLT_Optimized_Lab {
 	}
 
 	/**
+	 * Images and embedded frames that finished loading just before a shift and
+	 * sit above the shifted element: the usual cause of a layout shift. The
+	 * browser lists the elements that moved, not the one that pushed them, so
+	 * the timing and size of what had just loaded are the evidence.
+	 *
+	 * @param array      $run  Run.
+	 * @param float      $time When the shift happened (ms).
+	 * @param float      $dy   How far the element moved vertically (px).
+	 * @param mixed      $curr The element's rectangle after the shift.
+	 * @return array<string,array> code => { text, step } (image|embed)
+	 */
+	private static function late_assets( array $run, $time, $dy, $curr ) {
+		$window = (float) self::t( 'CLS_ASSET_WINDOW_MS' );
+		$y      = ( is_array( $curr ) && count( $curr ) > 1 ) ? (float) $curr[1] : null;
+
+		$images = array();
+		foreach ( (array) self::g( $run['lab'], 'images', array() ) as $image ) {
+			if ( is_array( $image ) && '' !== self::s( $image, 'src' ) ) {
+				$images[ $image['src'] ] = $image;
+			}
+		}
+
+		$strong = null;
+		$weak   = null;
+		$frame  = null;
+		foreach ( (array) self::g( $run['lab'], 'resources', array() ) as $resource ) {
+			if ( ! is_array( $resource ) ) {
+				continue;
+			}
+			$end = self::n( $resource, 'end', 0 );
+			if ( $end > $time + 100 || $end < $time - $window ) {
+				continue;
+			}
+			$url = self::s( $resource, 'url' );
+			if ( 'iframe' === self::s( $resource, 'type' ) && null === $frame ) {
+				$frame = array( $url, $end );
+				continue;
+			}
+			if ( ! isset( $images[ $url ] ) ) {
+				continue;
+			}
+			$image = $images[ $url ];
+			$top   = self::n( $image, 'top', 0 );
+			if ( null !== $y && $top > $y + 1 ) {
+				continue; // Below the element: it cannot have pushed it.
+			}
+			$height = self::n( $image, 'renderedH', 0 );
+			$match  = abs( $dy ) >= 1 && abs( $height - abs( $dy ) ) <= max( 20.0, 0.2 * abs( $dy ) );
+			if ( $match && null === $strong ) {
+				$strong = array( $url, $end, $height );
+			} elseif ( null === $weak ) {
+				$weak = array( $url, $end, $height );
+			}
+		}
+
+		$out  = array();
+		$pick = $strong ? $strong : $weak;
+		if ( $pick ) {
+			$file         = self::file_name( $pick[0] );
+			$out['image'] = array(
+				'text' => $strong
+					? sprintf(
+						/* translators: 1: image file name, 2: time, 3: image height in pixels, 4: distance moved in pixels. */
+						__( 'The image “%1$s” finished loading at %2$s, just before this shift, and is %3$s px tall (the content moved %4$s px): it probably had no reserved space.', 'blt-optimized' ),
+						$file,
+						self::fmt_ms( $pick[1] ),
+						number_format_i18n( round( $pick[2] ) ),
+						number_format_i18n( round( abs( $dy ) ) )
+					)
+					: sprintf(
+						/* translators: 1: image file name, 2: time. */
+						__( 'The image “%1$s” above it finished loading at %2$s, just before this shift; if it has no width and height it pushed this content down.', 'blt-optimized' ),
+						$file,
+						self::fmt_ms( $pick[1] )
+					),
+				'step' => sprintf(
+					/* translators: %s: image file name. */
+					__( 'Give “%s” width and height attributes (its real pixel size) or a CSS aspect-ratio, so the browser reserves its space before it downloads.', 'blt-optimized' ),
+					$file
+				),
+			);
+		}
+		if ( $frame ) {
+			$host         = (string) wp_parse_url( $frame[0], PHP_URL_HOST );
+			$out['embed'] = array(
+				'text' => sprintf(
+					/* translators: 1: host name of the embedded frame, 2: time. */
+					__( 'An embedded frame (%1$s) finished loading at %2$s, just before this shift; embeds without a reserved height push the content below them down.', 'blt-optimized' ),
+					'' !== $host ? $host : self::file_name( $frame[0] ),
+					self::fmt_ms( $frame[1] )
+				),
+				'step' => __( 'Wrap the embed in a container with a fixed aspect-ratio (for example aspect-ratio: 16 / 9) or give the iframe width and height attributes.', 'blt-optimized' ),
+			);
+		}
+		return $out;
+	}
+
+	/**
 	 * Likely reasons an element shifted, from what the browser recorded.
 	 *
 	 * @param array $run   Run.
@@ -3007,19 +3129,24 @@ class BLT_Optimized_Lab {
 			}
 		} else {
 			$dy = (float) $share['dy'];
-			if ( $dy >= 1 ) {
-				/* translators: %s: pixels. */
-				$text = sprintf( __( 'Something above it appeared or grew after the first paint and pushed it down by %s px.', 'blt-optimized' ), number_format_i18n( round( $dy ) ) );
-			} elseif ( $dy <= -1 ) {
-				/* translators: %s: pixels. */
-				$text = sprintf( __( 'Something above it shrank or disappeared after the first paint and pulled it up by %s px.', 'blt-optimized' ), number_format_i18n( round( abs( $dy ) ) ) );
-			} else {
-				$text = __( 'It was pushed sideways after the first paint by something that appeared next to it.', 'blt-optimized' );
+			foreach ( self::late_assets( $run, $time, $dy, $curr ) as $code => $cause ) {
+				$causes[ $code ] = $cause;
 			}
-			$causes['pushed'] = array(
-				'text' => $text,
-				'step' => __( 'Find what appears, grows or disappears around this element after the first paint (late-loading images, embeds, banners, notices or fonts) and reserve its space with explicit dimensions or a min-height.', 'blt-optimized' ),
-			);
+			if ( ! $causes ) {
+				if ( $dy >= 1 ) {
+					/* translators: %s: pixels. */
+					$text = sprintf( __( 'Something above it appeared or grew after the first paint and pushed it down by %s px.', 'blt-optimized' ), number_format_i18n( round( $dy ) ) );
+				} elseif ( $dy <= -1 ) {
+					/* translators: %s: pixels. */
+					$text = sprintf( __( 'Something above it shrank or disappeared after the first paint and pulled it up by %s px.', 'blt-optimized' ), number_format_i18n( round( abs( $dy ) ) ) );
+				} else {
+					$text = __( 'It was pushed sideways after the first paint by something that appeared next to it.', 'blt-optimized' );
+				}
+				$causes['pushed'] = array(
+					'text' => $text,
+					'step' => __( 'Find what appears, grows or disappears around this element after the first paint (late-loading images, embeds, banners, notices or fonts) and reserve its space with explicit dimensions or a min-height.', 'blt-optimized' ),
+				);
+			}
 		}
 
 		if ( 'img' !== $tag && ! in_array( $tag, array( 'iframe', 'video', 'embed', 'object' ), true ) ) {

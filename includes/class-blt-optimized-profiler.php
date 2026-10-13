@@ -122,12 +122,18 @@ class BLT_Optimized_Profiler {
 	private static $marks = array();
 
 	/**
-	 * Whether SAVEQUERIES was defined by us / whether queries are logged.
+	 * Whether SAVEQUERIES was defined by this profiler.
 	 *
 	 * @var bool
 	 */
 	private static $savequeries_forced = false;
-	private static $tracked            = false;
+
+	/**
+	 * Whether queries are being logged by wpdb (SAVEQUERIES on).
+	 *
+	 * @var bool
+	 */
+	private static $tracked = false;
 
 	/**
 	 * Plugin load events: array( plugin file, seconds, bytes ).
@@ -137,19 +143,31 @@ class BLT_Optimized_Profiler {
 	private static $load = array();
 
 	/**
-	 * Previous plugin_loaded timestamp / memory.
+	 * Previous plugin_loaded timestamp.
 	 *
 	 * @var float
 	 */
-	private static $last_t   = 0.0;
+	private static $last_t = 0.0;
+
+	/**
+	 * Memory in use at the previous plugin_loaded event.
+	 *
+	 * @var int
+	 */
 	private static $last_mem = 0;
 
 	/**
-	 * Theme (setup_theme -> after_setup_theme) timing.
+	 * When `setup_theme` finished (theme timing starts here).
 	 *
 	 * @var float
 	 */
-	private static $theme_t   = 0.0;
+	private static $theme_t = 0.0;
+
+	/**
+	 * Memory in use when `setup_theme` finished.
+	 *
+	 * @var int
+	 */
 	private static $theme_mem = 0;
 
 	/**
@@ -231,12 +249,18 @@ class BLT_Optimized_Profiler {
 	private static $prev_handler = null;
 
 	/**
-	 * Whether our error handler is installed / currently recording.
+	 * Whether our error handler is installed.
 	 *
 	 * @var bool
 	 */
 	private static $handler_installed = false;
-	private static $in_handler        = false;
+
+	/**
+	 * Re-entrancy guard: true while the handler is recording an error.
+	 *
+	 * @var bool
+	 */
+	private static $in_handler = false;
 
 	/**
 	 * Fallback query counters, used only when SAVEQUERIES is defined false.
@@ -259,8 +283,11 @@ class BLT_Optimized_Profiler {
 	 */
 	private static $redirected = false;
 
-	/* ------------------------------------------------------------------ */
-	/* Admin side                                                          */
+	/*
+	 * ------------------------------------------------------------------
+	 * Admin side
+	 * ------------------------------------------------------------------
+	 */
 	/* ------------------------------------------------------------------ */
 
 	/**
@@ -304,8 +331,11 @@ class BLT_Optimized_Profiler {
 		return is_array( $result ) ? $result : null;
 	}
 
-	/* ------------------------------------------------------------------ */
-	/* Activation                                                          */
+	/*
+	 * ------------------------------------------------------------------
+	 * Activation
+	 * ------------------------------------------------------------------
+	 */
 	/* ------------------------------------------------------------------ */
 
 	/**
@@ -349,7 +379,8 @@ class BLT_Optimized_Profiler {
 			return;
 		}
 
-		$token = $_GET[ self::QUERY_ARG ]; // phpcs:ignore WordPress.Security.NonceVerification.Recommended, WordPress.Security.ValidatedSanitizedInput.InputNotSanitized -- validated against a strict pattern below.
+		// The token is validated against a strict pattern below; nothing else is read from the request here.
+		$token = isset( $_GET[ self::QUERY_ARG ] ) ? wp_unslash( $_GET[ self::QUERY_ARG ] ) : ''; // phpcs:ignore WordPress.Security.NonceVerification.Recommended, WordPress.Security.ValidatedSanitizedInput.InputNotSanitized
 		if ( ! is_string( $token ) || 1 !== preg_match( '/^[A-Za-z0-9]{32}$/', $token ) ) {
 			return;
 		}
@@ -430,8 +461,11 @@ class BLT_Optimized_Profiler {
 		self::$handler_installed = true;
 	}
 
-	/* ------------------------------------------------------------------ */
-	/* Hook callbacks (public only because WordPress calls them)           */
+	/*
+	 * ------------------------------------------------------------------
+	 * Hook callbacks (public only because WordPress calls them)
+	 * ------------------------------------------------------------------
+	 */
 	/* ------------------------------------------------------------------ */
 
 	/**
@@ -555,7 +589,7 @@ class BLT_Optimized_Profiler {
 	 * @param float  $query_start     Start timestamp.
 	 * @return array
 	 */
-	public static function on_log_query( $query_data, $query = '', $query_time = 0, $query_callstack = '', $query_start = 0 ) {
+	public static function on_log_query( $query_data, $query = '', $query_time = 0, $query_callstack = '', $query_start = 0 ) { // phpcs:ignore Generic.CodeAnalysis.UnusedFunctionParameter -- fixed hook signature.
 		if ( ! is_array( $query_data ) ) {
 			$query_data = array();
 		}
@@ -722,7 +756,7 @@ class BLT_Optimized_Profiler {
 	 * @param int    $status   HTTP status.
 	 * @return string The (possibly token-carrying) location.
 	 */
-	public static function on_redirect( $location, $status = 302 ) {
+	public static function on_redirect( $location, $status = 302 ) { // phpcs:ignore Generic.CodeAnalysis.UnusedFunctionParameter -- fixed hook signature.
 		if ( ! self::$collecting || ! is_string( $location ) || '' === $location ) {
 			return $location;
 		}
@@ -753,7 +787,7 @@ class BLT_Optimized_Profiler {
 	 * @return bool
 	 */
 	public static function handle_error( $errno, $errstr, $errfile = '', $errline = 0 ) {
-		if ( self::$collecting && ! self::$in_handler && ( error_reporting() & $errno ) ) {
+		if ( self::$collecting && ! self::$in_handler && ( error_reporting() & $errno ) ) { // phpcs:ignore WordPress.PHP.DevelopmentFunctions.prevent_path_disclosure_error_reporting, WordPress.PHP.DiscouragedPHPFunctions.runtime_configuration_error_reporting -- read-only: honours @ and the site's error_reporting.
 			self::$in_handler = true;
 			try {
 				self::record_error( (int) $errno, (string) $errstr, (string) $errfile, (int) $errline );
@@ -794,8 +828,11 @@ class BLT_Optimized_Profiler {
 		}
 	}
 
-	/* ------------------------------------------------------------------ */
-	/* Recording helpers                                                   */
+	/*
+	 * ------------------------------------------------------------------
+	 * Recording helpers
+	 * ------------------------------------------------------------------
+	 */
 	/* ------------------------------------------------------------------ */
 
 	/**
@@ -906,7 +943,7 @@ class BLT_Optimized_Profiler {
 	 * @return array
 	 */
 	private static function core_component() {
-		$component = BLT_Optimized_Components::make( 'core', 'wordpress', __( 'WordPress core', 'blt-optimized' ) );
+		$component = BLT_Optimized_Components::make( 'core', 'wordpress', __( 'WordPress core', 'blt-optimized' ) ); // phpcs:ignore WordPress.WP.CapitalPDangit -- component slug.
 		self::register( $component );
 		return $component;
 	}
@@ -1038,8 +1075,11 @@ class BLT_Optimized_Profiler {
 		}
 	}
 
-	/* ------------------------------------------------------------------ */
-	/* Compiling                                                           */
+	/*
+	 * ------------------------------------------------------------------
+	 * Compiling
+	 * ------------------------------------------------------------------
+	 */
 	/* ------------------------------------------------------------------ */
 
 	/**
@@ -1091,16 +1131,16 @@ class BLT_Optimized_Profiler {
 	/**
 	 * Run one section builder, returning $default if it throws.
 	 *
-	 * @param string $name    Section.
-	 * @param mixed  $default Fallback value.
+	 * @param string $name     Section.
+	 * @param mixed  $fallback Value returned if the builder throws.
 	 * @return mixed
 	 */
-	private static function section( $name, $default ) {
+	private static function section( $name, $fallback ) {
 		try {
 			return call_user_func( array( __CLASS__, 'compile_' . $name ) );
 		} catch ( \Throwable $e ) {
 			unset( $e );
-			return $default;
+			return $fallback;
 		}
 	}
 
@@ -1225,14 +1265,14 @@ class BLT_Optimized_Profiler {
 		global $wp_query;
 
 		$have = $wp_query instanceof WP_Query;
-		$cond = static function ( $function ) use ( $have ) {
-			return ( $have && function_exists( $function ) ) ? (bool) call_user_func( $function ) : false;
+		$cond = static function ( $callback ) use ( $have ) {
+			return ( $have && function_exists( $callback ) ) ? (bool) call_user_func( $callback ) : false;
 		};
-		$woo = static function ( $function ) use ( $have ) {
-			if ( ! function_exists( $function ) ) {
+		$woo  = static function ( $callback ) use ( $have ) {
+			if ( ! function_exists( $callback ) ) {
 				return null; // WooCommerce absent.
 			}
-			return $have ? (bool) call_user_func( $function ) : false;
+			return $have ? (bool) call_user_func( $callback ) : false;
 		};
 
 		$conditionals = array(
@@ -1350,8 +1390,8 @@ class BLT_Optimized_Profiler {
 			}
 
 			++$out['by_type'][ self::query_type( $sql ) ];
-			$total        += $t;
-			$times[ $i ]   = $t;
+			$total      += $t;
+			$times[ $i ] = $t;
 
 			if ( isset( $by_comp[ $ckey ] ) ) {
 				++$by_comp[ $ckey ][0];
@@ -1421,7 +1461,7 @@ class BLT_Optimized_Profiler {
 		uasort(
 			$dupes,
 			static function ( $a, $b ) {
-				return ( $b[0] <=> $a[0] ) ?: ( $b[1] <=> $a[1] );
+				return ( $b[0] === $a[0] ) ? ( $b[1] <=> $a[1] ) : ( $b[0] <=> $a[0] );
 			}
 		);
 		foreach ( array_slice( $dupes, 0, self::TOP_N, true ) as $g ) {
@@ -1456,8 +1496,8 @@ class BLT_Optimized_Profiler {
 
 		$by_comp = $fb['by_comp'];
 		foreach ( $fb['deferred'] as $trace ) {
-			$resolved = self::resolve( array( 't' => $trace ) );
-			$key      = BLT_Optimized_Components::key( $resolved[0] );
+			$resolved        = self::resolve( array( 't' => $trace ) );
+			$key             = BLT_Optimized_Components::key( $resolved[0] );
 			$by_comp[ $key ] = isset( $by_comp[ $key ] ) ? $by_comp[ $key ] + 1 : 1;
 		}
 		arsort( $by_comp );
@@ -1749,7 +1789,7 @@ class BLT_Optimized_Profiler {
 		static $owners = null;
 
 		if ( 1 === preg_match( '/^(wp-|global-styles|core-|classic-theme|block-style|block-library|jquery|admin-bar|dashicons|thickbox|utils$|common$|heartbeat|customize-|editor-|media-|colors)/', $handle ) ) {
-			return BLT_Optimized_Components::make( 'core', 'wordpress', __( 'WordPress core', 'blt-optimized' ) );
+			return BLT_Optimized_Components::make( 'core', 'wordpress', __( 'WordPress core', 'blt-optimized' ) ); // phpcs:ignore WordPress.WP.CapitalPDangit -- component slug.
 		}
 
 		if ( null === $owners ) {
@@ -1901,8 +1941,11 @@ class BLT_Optimized_Profiler {
 		return $out;
 	}
 
-	/* ------------------------------------------------------------------ */
-	/* Small utilities                                                     */
+	/*
+	 * ------------------------------------------------------------------
+	 * Small utilities
+	 * ------------------------------------------------------------------
+	 */
 	/* ------------------------------------------------------------------ */
 
 	/**

@@ -146,15 +146,27 @@ class BLT_Optimized_Tweaks {
 	/**
 	 * Current settings merged over the defaults.
 	 *
+	 * Every value is normalized on the way out, so a hand-edited or corrupted
+	 * option falls back to the default for that setting instead of, say,
+	 * turning revisions off. Rules are returned as stored; rules() and the
+	 * runtime validate them.
+	 *
 	 * @return array
 	 */
 	public static function get() {
 		$stored = get_option( self::OPTION, array() );
 		$stored = is_array( $stored ) ? $stored : array();
-		$out    = array_merge( self::defaults(), array_intersect_key( $stored, self::defaults() ) );
+		$out    = array();
 
-		if ( ! is_array( $out['rules'] ) ) {
-			$out['rules'] = array();
+		foreach ( self::defaults() as $key => $default ) {
+			if ( 'rules' === $key ) {
+				$out[ $key ] = ( isset( $stored[ $key ] ) && is_array( $stored[ $key ] ) ) ? $stored[ $key ] : array();
+			} elseif ( ! array_key_exists( $key, $stored ) ) {
+				$out[ $key ] = $default;
+			} else {
+				$value       = self::normalize( $key, $stored[ $key ], false );
+				$out[ $key ] = ( null === $value ) ? $default : $value;
+			}
 		}
 		return $out;
 	}
@@ -209,7 +221,7 @@ class BLT_Optimized_Tweaks {
 		$from_form = ! empty( $input['_form'] );
 		$out       = array();
 
-		foreach ( self::defaults() as $key => $default ) {
+		foreach ( array_keys( self::defaults() ) as $key ) {
 			if ( 'rules' === $key ) {
 				$out[ $key ] = array_key_exists( 'rules', $input )
 					? self::sanitize_rules( $input['rules'] )

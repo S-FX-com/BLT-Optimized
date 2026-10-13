@@ -77,8 +77,8 @@ $blt_psi_on   = ! empty( $blt_settings['enable_psi'] );
 						?>
 					</span>
 				<?php endif; ?>
-				<span id="blt-profiler-status" class="blt-profiler-status" aria-live="polite"></span>
 			</div>
+			<div id="blt-profiler-status" class="blt-profiler-status" aria-live="polite"></div>
 		</div>
 	</div>
 

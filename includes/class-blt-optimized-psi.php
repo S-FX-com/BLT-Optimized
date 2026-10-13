@@ -1039,9 +1039,10 @@ class BLT_Optimized_PSI {
 			$node            = $row['node'];
 			$out['snippet']  = isset( $node['snippet'] ) ? self::excerpt( (string) $node['snippet'], 300 ) : '';
 			$out['selector'] = isset( $node['selector'] ) ? self::excerpt( (string) $node['selector'], 200 ) : '';
-			$label           = isset( $node['nodeLabel'] ) ? (string) $node['nodeLabel'] : '';
-			if ( '' === $label ) {
-				$label = '' !== $out['snippet'] ? $out['snippet'] : $out['selector'];
+			$label           = isset( $node['nodeLabel'] ) ? trim( (string) $node['nodeLabel'] ) : '';
+			// A bare tag name ("img") says nothing; a snippet identifies the element.
+			if ( '' === $label || ( false === strpos( $label, ' ' ) && strlen( $label ) <= 14 && ( '' !== $out['snippet'] || '' !== $out['selector'] ) ) ) {
+				$label = '' !== $out['snippet'] ? $out['snippet'] : ( '' !== $out['selector'] ? $out['selector'] : $label );
 			}
 			$out['label'] = self::excerpt( $label, 140 );
 		}
@@ -1675,7 +1676,8 @@ class BLT_Optimized_PSI {
 
 	/**
 	 * Per-audit configuration for component-grouped asset findings. Format
-	 * arguments: 1 component name, 2 amount, 3 page, 4 file count, 5 total size.
+	 * arguments: 1 component name, 2 amount, 3 page, 4 file count, 5 total size,
+	 * 6 component name for mid-sentence use.
 	 *
 	 * @param string $audit_id Audit id.
 	 * @return array
@@ -1688,11 +1690,10 @@ class BLT_Optimized_PSI {
 					'measure' => 'bytes',
 					'rows'    => 'unused',
 					'fix'     => 'asset_rule',
-					'noun'    => __( 'script', 'blt-optimized' ),
 					/* translators: 1: plugin/theme/host, 2: size, 3: page. */
 					'title'   => __( '%1$s ships %2$s of unused JavaScript on %3$s', 'blt-optimized' ),
-					/* translators: 1: plugin/theme/host, 2: size, 3: page, 4: number of files, 5: total size. */
-					'summary' => __( 'Lighthouse found %4$s from %1$s where %2$s of the %5$s downloaded is never executed while rendering %3$s. Unused JavaScript is still downloaded, parsed and compiled, which delays interactivity on phones. Loading it only on the pages that need it removes that cost.', 'blt-optimized' ),
+					/* translators: 1: plugin/theme/host, 2: size, 3: page, 4: number of files, 5: total size, 6: plugin/theme/host in mid-sentence form. */
+					'summary' => __( 'Lighthouse found %4$s from %6$s where %2$s of the %5$s downloaded is never executed while rendering %3$s. Unused JavaScript is still downloaded, parsed and compiled, which delays interactivity on phones. Loading it only on the pages that need it removes that cost.', 'blt-optimized' ),
 				);
 			case 'unused-css-rules':
 				return array(
@@ -1700,11 +1701,10 @@ class BLT_Optimized_PSI {
 					'measure' => 'bytes',
 					'rows'    => 'unused',
 					'fix'     => 'asset_rule',
-					'noun'    => __( 'stylesheet', 'blt-optimized' ),
 					/* translators: 1: plugin/theme/host, 2: size, 3: page. */
 					'title'   => __( '%1$s ships %2$s of unused CSS on %3$s', 'blt-optimized' ),
-					/* translators: 1: plugin/theme/host, 2: size, 3: page, 4: number of files, 5: total size. */
-					'summary' => __( 'Lighthouse found %4$s from %1$s where %2$s of the %5$s downloaded isn\'t used by anything on %3$s. Stylesheets block rendering, so every unused kilobyte delays the first paint. Loading the stylesheet only where it is used removes that cost.', 'blt-optimized' ),
+					/* translators: 1: plugin/theme/host, 2: size, 3: page, 4: number of files, 5: total size, 6: plugin/theme/host in mid-sentence form. */
+					'summary' => __( 'Lighthouse found %4$s from %6$s where %2$s of the %5$s downloaded isn\'t used by anything on %3$s. Stylesheets block rendering, so every unused kilobyte delays the first paint. Loading the stylesheet only where it is used removes that cost.', 'blt-optimized' ),
 				);
 			case 'unminified-javascript':
 				return array(
@@ -1712,11 +1712,10 @@ class BLT_Optimized_PSI {
 					'measure' => 'bytes',
 					'rows'    => 'savings',
 					'fix'     => 'minify',
-					'noun'    => __( 'script', 'blt-optimized' ),
 					/* translators: 1: plugin/theme/host, 2: size, 3: page. */
 					'title'   => __( '%1$s serves %2$s of JavaScript that isn\'t minified on %3$s', 'blt-optimized' ),
-					/* translators: 1: plugin/theme/host, 2: size, 3: page, 4: number of files, 5: total size. */
-					'summary' => __( '%4$s from %1$s on %3$s could be %2$s smaller if minified (whitespace and comments stripped). Smaller scripts download and parse faster.', 'blt-optimized' ),
+					/* translators: 1: plugin/theme/host, 2: size, 3: page, 4: number of files, 5: total size, 6: plugin/theme/host in mid-sentence form. */
+					'summary' => __( 'The JavaScript in %4$s from %6$s on %3$s is served with its whitespace and comments intact; minifying it would save about %2$s. Smaller scripts download and parse faster.', 'blt-optimized' ),
 				);
 			case 'unminified-css':
 				return array(
@@ -1724,11 +1723,10 @@ class BLT_Optimized_PSI {
 					'measure' => 'bytes',
 					'rows'    => 'savings',
 					'fix'     => 'minify',
-					'noun'    => __( 'stylesheet', 'blt-optimized' ),
 					/* translators: 1: plugin/theme/host, 2: size, 3: page. */
 					'title'   => __( '%1$s serves %2$s of CSS that isn\'t minified on %3$s', 'blt-optimized' ),
-					/* translators: 1: plugin/theme/host, 2: size, 3: page, 4: number of files, 5: total size. */
-					'summary' => __( '%4$s from %1$s on %3$s could be %2$s smaller if minified. Smaller stylesheets unblock rendering sooner.', 'blt-optimized' ),
+					/* translators: 1: plugin/theme/host, 2: size, 3: page, 4: number of files, 5: total size, 6: plugin/theme/host in mid-sentence form. */
+					'summary' => __( 'The CSS in %4$s from %6$s on %3$s is served with its whitespace and comments intact; minifying it would save about %2$s. Smaller stylesheets unblock rendering sooner.', 'blt-optimized' ),
 				);
 			case 'legacy-javascript':
 				return array(
@@ -1736,11 +1734,10 @@ class BLT_Optimized_PSI {
 					'measure' => 'bytes',
 					'rows'    => 'detail',
 					'fix'     => 'update',
-					'noun'    => __( 'script', 'blt-optimized' ),
 					/* translators: 1: plugin/theme/host, 2: size, 3: page. */
 					'title'   => __( '%1$s ships %2$s of legacy JavaScript (polyfills for old browsers) on %3$s', 'blt-optimized' ),
-					/* translators: 1: plugin/theme/host, 2: size, 3: page, 4: number of files, 5: total size. */
-					'summary' => __( '%4$s from %1$s on %3$s include code that translates modern JavaScript for browsers almost nobody uses any more, adding about %2$s every visitor downloads and runs.', 'blt-optimized' ),
+					/* translators: 1: plugin/theme/host, 2: size, 3: page, 4: number of files, 5: total size, 6: plugin/theme/host in mid-sentence form. */
+					'summary' => __( 'The JavaScript in %4$s from %6$s on %3$s includes code that translates modern JavaScript for browsers almost nobody uses any more, adding about %2$s every visitor downloads and runs.', 'blt-optimized' ),
 				);
 			case 'duplicated-javascript':
 				return array(
@@ -1748,11 +1745,10 @@ class BLT_Optimized_PSI {
 					'measure' => 'bytes',
 					'rows'    => 'detail',
 					'fix'     => 'duplicate',
-					'noun'    => __( 'script', 'blt-optimized' ),
 					/* translators: 1: plugin/theme/host, 2: size, 3: page. */
 					'title'   => __( '%1$s bundles %2$s of JavaScript that another file on %3$s already loads', 'blt-optimized' ),
-					/* translators: 1: plugin/theme/host, 2: size, 3: page, 4: number of files, 5: total size. */
-					'summary' => __( '%4$s from %1$s on %3$s contain JavaScript modules that other scripts on the page also include, wasting about %2$s. Usually two plugins (or a plugin and the theme) each bundle their own copy of the same library.', 'blt-optimized' ),
+					/* translators: 1: plugin/theme/host, 2: size, 3: page, 4: number of files, 5: total size, 6: plugin/theme/host in mid-sentence form. */
+					'summary' => __( 'The JavaScript in %4$s from %6$s on %3$s contains modules that other scripts on the page also include, wasting about %2$s. Usually two plugins (or a plugin and the theme) each bundle their own copy of the same library.', 'blt-optimized' ),
 				);
 			case 'render-blocking-resources':
 				return array(
@@ -1760,11 +1756,10 @@ class BLT_Optimized_PSI {
 					'measure' => 'ms',
 					'rows'    => 'blocking',
 					'fix'     => 'render_blocking',
-					'noun'    => __( 'file', 'blt-optimized' ),
 					/* translators: 1: plugin/theme/host, 2: time, 3: page. */
 					'title'   => __( '%1$s delays the first paint by up to %2$s on %3$s', 'blt-optimized' ),
-					/* translators: 1: plugin/theme/host, 2: time, 3: page, 4: number of files, 5: total size. */
-					'summary' => __( '%4$s from %1$s on %3$s must be downloaded and processed before the browser can show anything. Visitors can stare at a blank page for up to %2$s longer than necessary. Deferring scripts and loading non-critical styles later fixes this.', 'blt-optimized' ),
+					/* translators: 1: plugin/theme/host, 2: time, 3: page, 4: number of files, 5: total size, 6: plugin/theme/host in mid-sentence form. */
+					'summary' => __( '%4$s from %6$s on %3$s must be downloaded and processed before the browser can show anything. Visitors can stare at a blank page for up to %2$s longer than necessary. Deferring scripts and loading non-critical styles later fixes this.', 'blt-optimized' ),
 				);
 			case 'bootup-time':
 				return array(
@@ -1772,11 +1767,10 @@ class BLT_Optimized_PSI {
 					'measure' => 'cpu',
 					'rows'    => 'cpu',
 					'fix'     => 'cpu',
-					'noun'    => __( 'script', 'blt-optimized' ),
 					/* translators: 1: plugin/theme/host, 2: time, 3: page. */
 					'title'   => __( '%1$s keeps the main thread busy for %2$s on %3$s', 'blt-optimized' ),
-					/* translators: 1: plugin/theme/host, 2: time, 3: page, 4: number of files, 5: total size. */
-					'summary' => __( 'Running and parsing %4$s from %1$s took %2$s of CPU time on Lighthouse\'s test phone. While the main thread is busy the page ignores taps and scrolls, which is what Total Blocking Time and Interaction to Next Paint measure.', 'blt-optimized' ),
+					/* translators: 1: plugin/theme/host, 2: time, 3: page, 4: number of files, 5: total size, 6: plugin/theme/host in mid-sentence form. */
+					'summary' => __( 'Running and parsing %4$s from %6$s took %2$s of CPU time on Lighthouse\'s test phone. While the main thread is busy the page ignores taps and scrolls, which is what Total Blocking Time and Interaction to Next Paint measure.', 'blt-optimized' ),
 				);
 			case 'third-party-summary':
 				return array(
@@ -1784,10 +1778,9 @@ class BLT_Optimized_PSI {
 					'measure' => 'cpu',
 					'rows'    => 'third_party',
 					'fix'     => 'third_party',
-					'noun'    => __( 'request', 'blt-optimized' ),
 					/* translators: 1: third party name, 2: blocking time, 3: page. */
 					'title'   => __( '%1$s blocks the main thread for %2$s on %3$s', 'blt-optimized' ),
-					/* translators: 1: third party name, 2: blocking time, 3: page, 4: number of files, 5: total size. */
+					/* translators: 1: third party name, 2: blocking time, 3: page, 4: number of files, 5: total size, 6: third party name in mid-sentence form. */
 					'summary' => __( '%1$s runs code on %3$s that blocks the main thread for %2$s and downloads %5$s. Third-party tags (analytics, chat, ads, embeds) are outside your control, so the fix is to remove what you don\'t use or load the rest after the page is interactive.', 'blt-optimized' ),
 				);
 		}
@@ -1880,7 +1873,7 @@ class BLT_Optimized_PSI {
 					'category'  => 'assets',
 					'severity'  => $severity,
 					'title'     => sprintf( $cfg['title'], $name, $amount, $ctx['on'] ),
-					'summary'   => sprintf( $cfg['summary'], $name, $amount, $ctx['on'], $files, size_format( max( 1, $group['total_bytes'] ), 0 ) ),
+					'summary'   => sprintf( $cfg['summary'], $name, $amount, $ctx['on'], $files, size_format( max( 1, $group['total_bytes'] ), 0 ), self::component_name( $component, true ) ),
 					'impact'    => $impact,
 					'component' => $component,
 					'where'     => self::where( $ctx, $group['items'] ),
@@ -1944,7 +1937,7 @@ class BLT_Optimized_PSI {
 	 * @return array|null
 	 */
 	private static function component_fix( $kind, array $component, array $group, array $cfg, array $ctx ) {
-		$name  = self::component_name( $component );
+		$name  = self::component_name( $component, true );
 		$first = isset( $group['items'][0]['url'] ) ? self::short_url( $group['items'][0]['url'], $ctx, false ) : '';
 		$type  = isset( $component['type'] ) ? $component['type'] : 'other';
 
@@ -2162,40 +2155,32 @@ class BLT_Optimized_PSI {
 
 		$cfg = array(
 			'uses-optimized-images'  => array(
-				'id'      => 'psi.optimized_images',
+				'id'    => 'psi.optimized_images',
 				/* translators: %1$s: size, %2$s: page. */
-				'media'   => __( 'Images on %2$s could be %1$s smaller with better compression', 'blt-optimized' ),
+				'media' => __( 'Images on %2$s could be %1$s smaller with better compression', 'blt-optimized' ),
 				/* translators: 1: size, 2: page, 3: plugin/theme/host. */
-				'named'   => __( '%3$s serves images that could be %1$s smaller with better compression on %2$s', 'blt-optimized' ),
-				/* translators: 1: number of images, 2: size, 3: page. */
-				'summary' => __( '%1$s on %3$s are saved at a higher quality than needed; recompressing them would save about %2$s without a visible difference.', 'blt-optimized' ),
+				'named' => __( '%3$s serves images that could be %1$s smaller with better compression on %2$s', 'blt-optimized' ),
 			),
 			'modern-image-formats'   => array(
-				'id'      => 'psi.modern_formats',
+				'id'    => 'psi.modern_formats',
 				/* translators: %1$s: size, %2$s: page. */
-				'media'   => __( 'Images on %2$s could be %1$s smaller as WebP or AVIF', 'blt-optimized' ),
+				'media' => __( 'Images on %2$s could be %1$s smaller as WebP or AVIF', 'blt-optimized' ),
 				/* translators: 1: size, 2: page, 3: plugin/theme/host. */
-				'named'   => __( '%3$s serves JPEG/PNG images that could be %1$s smaller as WebP or AVIF on %2$s', 'blt-optimized' ),
-				/* translators: 1: number of images, 2: size, 3: page. */
-				'summary' => __( '%1$s on %3$s use older formats (JPEG, PNG or GIF). WebP and AVIF look the same at a fraction of the size, saving about %2$s per visit.', 'blt-optimized' ),
+				'named' => __( '%3$s serves JPEG/PNG images that could be %1$s smaller as WebP or AVIF on %2$s', 'blt-optimized' ),
 			),
 			'uses-responsive-images' => array(
-				'id'      => 'psi.responsive_images',
+				'id'    => 'psi.responsive_images',
 				/* translators: %1$s: size, %2$s: page. */
-				'media'   => __( 'Images on %2$s are larger than displayed, wasting %1$s', 'blt-optimized' ),
+				'media' => __( 'Images on %2$s are larger than displayed, wasting %1$s', 'blt-optimized' ),
 				/* translators: 1: size, 2: page, 3: plugin/theme/host. */
-				'named'   => __( '%3$s serves images larger than they are displayed on %2$s, wasting %1$s', 'blt-optimized' ),
-				/* translators: 1: number of images, 2: size, 3: page. */
-				'summary' => __( '%1$s on %3$s are downloaded at a much higher resolution than the space they fill, wasting about %2$s. Serving the right size (responsive srcset) lets phones download small versions.', 'blt-optimized' ),
+				'named' => __( '%3$s serves images larger than they are displayed on %2$s, wasting %1$s', 'blt-optimized' ),
 			),
 			'offscreen-images'       => array(
-				'id'      => 'psi.offscreen_images',
+				'id'    => 'psi.offscreen_images',
 				/* translators: %1$s: size, %2$s: page. */
-				'media'   => __( 'Images below the fold on %2$s are loaded up front (%1$s)', 'blt-optimized' ),
+				'media' => __( 'Images below the fold on %2$s are loaded up front (%1$s)', 'blt-optimized' ),
 				/* translators: 1: size, 2: page, 3: plugin/theme/host. */
-				'named'   => __( '%3$s loads images below the fold up front on %2$s (%1$s)', 'blt-optimized' ),
-				/* translators: 1: number of images, 2: size, 3: page. */
-				'summary' => __( '%1$s on %3$s are far down the page but downloaded immediately, competing with what the visitor sees first (about %2$s). Lazy-loading them speeds up the first view.', 'blt-optimized' ),
+				'named' => __( '%3$s loads images below the fold up front on %2$s (%1$s)', 'blt-optimized' ),
 			),
 		);
 		if ( ! isset( $cfg[ $audit_id ] ) ) {
@@ -2242,8 +2227,6 @@ class BLT_Optimized_PSI {
 			}
 			$component = $group['component'];
 			$count     = count( $group['items'] );
-			/* translators: %d: number of images. */
-			$images = sprintf( _n( '%d image', '%d images', $count, 'blt-optimized' ), $count );
 			$size   = size_format( $group['wasted_bytes'], $group['wasted_bytes'] >= MB_IN_BYTES ? 1 : 0 );
 			$ms     = (float) $audit['savings_ms'] * ( $group['wasted_bytes'] / $all_wasted );
 			$name   = null === $component ? '' : self::component_name( $component );
@@ -2255,7 +2238,7 @@ class BLT_Optimized_PSI {
 					'category'  => 'content',
 					'severity'  => self::severity( $ms, $group['wasted_bytes'], false ),
 					'title'     => null === $component ? sprintf( $cfg['media'], $size, $ctx['on'] ) : sprintf( $cfg['named'], $size, $ctx['on'], $name ),
-					'summary'   => sprintf( $cfg['summary'], $images, $size, $ctx['on'] ),
+					'summary'   => self::image_summary( $audit_id, $count, $size, $ctx['on'] ),
 					'impact'    => array(
 						'type'  => 'bytes',
 						'value' => $group['wasted_bytes'],
@@ -2269,6 +2252,31 @@ class BLT_Optimized_PSI {
 			);
 		}
 		return $findings;
+	}
+
+	/**
+	 * Summary text of an image finding (singular/plural aware).
+	 *
+	 * @param string $audit_id Audit id.
+	 * @param int    $count    Number of images.
+	 * @param string $size     Saving, formatted.
+	 * @param string $on       Page and strategy.
+	 * @return string
+	 */
+	private static function image_summary( $audit_id, $count, $size, $on ) {
+		switch ( $audit_id ) {
+			case 'uses-optimized-images':
+				/* translators: 1: number of images, 2: size, 3: page. */
+				return sprintf( _n( 'Lighthouse found %1$d image on %3$s saved at a higher quality than needed; recompressing it would save about %2$s without a visible difference.', 'Lighthouse found %1$d images on %3$s saved at a higher quality than needed; recompressing them would save about %2$s without a visible difference.', $count, 'blt-optimized' ), $count, $size, $on );
+			case 'modern-image-formats':
+				/* translators: 1: number of images, 2: size, 3: page. */
+				return sprintf( _n( 'Lighthouse found %1$d image on %3$s in an older format (JPEG, PNG or GIF). WebP and AVIF look the same at a fraction of the size, saving about %2$s per visit.', 'Lighthouse found %1$d images on %3$s in older formats (JPEG, PNG or GIF). WebP and AVIF look the same at a fraction of the size, saving about %2$s per visit.', $count, 'blt-optimized' ), $count, $size, $on );
+			case 'uses-responsive-images':
+				/* translators: 1: number of images, 2: size, 3: page. */
+				return sprintf( _n( 'Lighthouse found %1$d image on %3$s downloaded at a much higher resolution than the space it fills, wasting about %2$s. Serving the right size (responsive srcset) lets phones download a small version.', 'Lighthouse found %1$d images on %3$s downloaded at a much higher resolution than the space they fill, wasting about %2$s. Serving the right size (responsive srcset) lets phones download small versions.', $count, 'blt-optimized' ), $count, $size, $on );
+		}
+		/* translators: 1: number of images, 2: size, 3: page. */
+		return sprintf( _n( 'Lighthouse found %1$d image on %3$s that is far down the page but downloaded immediately, competing with what the visitor sees first (about %2$s). Lazy-loading it speeds up the first view.', 'Lighthouse found %1$d images on %3$s that are far down the page but downloaded immediately, competing with what the visitor sees first (about %2$s). Lazy-loading them speeds up the first view.', $count, 'blt-optimized' ), $count, $size, $on );
 	}
 
 	/**
@@ -2288,7 +2296,7 @@ class BLT_Optimized_PSI {
 				'type'  => 'manual',
 				'label' => __( 'How to fix', 'blt-optimized' ),
 				/* translators: 1: host name, 2: example image. */
-				'steps' => sprintf( __( 'These images are served by %1$s (for example %2$s), so you can\'t recompress them. Request a smaller size from that service (many accept width/quality parameters in the URL) or host the images yourself.', 'blt-optimized' ), self::component_name( $component ), $first ),
+				'steps' => sprintf( __( 'These images are served by %1$s (for example %2$s), so you can\'t recompress them. Request a smaller size from that service (many accept width/quality parameters in the URL) or host the images yourself.', 'blt-optimized' ), self::component_name( $component, true ), $first ),
 			);
 		}
 		if ( null !== $component ) {
@@ -2296,7 +2304,7 @@ class BLT_Optimized_PSI {
 				'type'  => 'manual',
 				'label' => __( 'How to fix', 'blt-optimized' ),
 				/* translators: 1: component name, 2: example image. */
-				'steps' => sprintf( __( 'These images ship inside %1$s (for example %2$s). Replace them with optimized files in a child theme or the plugin\'s own image setting, or ask the developer to ship smaller images.', 'blt-optimized' ), self::component_name( $component ), $first ),
+				'steps' => sprintf( __( 'These images ship inside %1$s (for example %2$s). Replace them with optimized files in a child theme or the plugin\'s own image setting, or ask the developer to ship smaller images.', 'blt-optimized' ), self::component_name( $component, true ), $first ),
 			);
 		}
 
@@ -2922,9 +2930,10 @@ class BLT_Optimized_PSI {
 	 * Human name of a component for a sentence.
 	 *
 	 * @param array $component Component.
+	 * @param bool  $mid       Used in the middle of a sentence (lower-case "the").
 	 * @return string
 	 */
-	private static function component_name( array $component ) {
+	private static function component_name( array $component, $mid = false ) {
 		$name = isset( $component['name'] ) && '' !== $component['name'] ? $component['name'] : ( isset( $component['slug'] ) ? $component['slug'] : __( 'Unknown', 'blt-optimized' ) );
 		switch ( isset( $component['type'] ) ? $component['type'] : 'other' ) {
 			case 'theme':
@@ -2935,14 +2944,22 @@ class BLT_Optimized_PSI {
 						$name = (string) $theme->get( 'Name' );
 					}
 				}
-				/* translators: %s: theme name. */
-				return sprintf( __( 'The %s theme', 'blt-optimized' ), $name );
+				return $mid
+					/* translators: %s: theme name. */
+					? sprintf( __( 'the %s theme', 'blt-optimized' ), $name )
+					/* translators: %s: theme name. */
+					: sprintf( __( 'The %s theme', 'blt-optimized' ), $name );
 			case 'mu-plugin':
-				/* translators: %s: must-use plugin name. */
-				return sprintf( __( 'Must-use plugin %s', 'blt-optimized' ), $name );
+				return $mid
+					/* translators: %s: must-use plugin name. */
+					? sprintf( __( 'the %s must-use plugin', 'blt-optimized' ), $name )
+					/* translators: %s: must-use plugin name. */
+					: sprintf( __( 'Must-use plugin %s', 'blt-optimized' ), $name );
 			case 'external':
-				/* translators: %s: third-party host or service name. */
-				return sprintf( __( 'Third-party %s', 'blt-optimized' ), $name );
+				return $mid
+					? $name
+					/* translators: %s: third-party host or service name. */
+					: sprintf( __( 'Third-party %s', 'blt-optimized' ), $name );
 		}
 		return $name;
 	}
@@ -3101,6 +3118,19 @@ class BLT_Optimized_PSI {
 					$rows[]  = array( $file, $label, $size( $item['total_bytes'] ), $owner );
 					break;
 			}
+		}
+
+		// Element tables without any file (layout shifts, lazy LCP): one column is enough.
+		if ( 'node' === $kind && ! empty( $rows ) && count( array_filter( wp_list_pluck( $rows, 1 ), static function ( $cell ) use ( $dash ) {
+			return $dash !== $cell;
+		} ) ) === 0 ) {
+			$columns = array( $columns[0] );
+			$rows    = array_map(
+				static function ( $row ) {
+					return array( $row[0] );
+				},
+				$rows
+			);
 		}
 
 		return array(

@@ -884,15 +884,25 @@ class BLT_Optimized_Fixes {
 				break;
 			}
 		}
-		$bytes = isset( $result['bytes'] ) ? (int) $result['bytes'] : 0;
+		$bytes   = isset( $result['bytes'] ) ? (int) $result['bytes'] : 0;
+		$skipped = isset( $result['skipped'] ) ? (int) $result['skipped'] : 0;
+
+		$message = sprintf(
+			/* translators: 1: number of files, 2: human-readable size. */
+			_n( 'Deleted %1$s file, freeing %2$s.', 'Deleted %1$s files, freeing %2$s.', $files, 'blt-optimized' ),
+			number_format_i18n( $files ),
+			size_format( $bytes )
+		);
+		if ( $skipped > 0 ) {
+			$message .= ' ' . sprintf(
+				/* translators: %s: number of items. */
+				_n( '%s item was skipped because it changed or is now in use.', '%s items were skipped because they changed or are now in use.', $skipped, 'blt-optimized' ),
+				number_format_i18n( $skipped )
+			);
+		}
 
 		return array(
-			'message' => sprintf(
-				/* translators: 1: number of files, 2: human-readable size. */
-				_n( 'Deleted %1$s file, freeing %2$s.', 'Deleted %1$s files, freeing %2$s.', $files, 'blt-optimized' ),
-				number_format_i18n( $files ),
-				size_format( $bytes )
-			),
+			'message' => $message,
 			'changed' => $files > 0,
 			'rows'    => $files,
 			'bytes'   => $bytes,

@@ -237,9 +237,10 @@
 	/**
 	 * Table markup. headers: strings or { label, cls }. rows: arrays of cells,
 	 * or { cells, cls }. A cell is an HTML string (already escaped) or { html, cls }.
+	 * `flush` drops the border so the table can run edge to edge inside a card.
 	 */
-	function tableHtml( headers, rows, cls ) {
-		var html = '<div class="blt-table-scroll"><table class="widefat striped blt-perf-table' + ( cls ? ' ' + cls : '' ) + '"><thead><tr>';
+	function tableHtml( headers, rows, cls, flush ) {
+		var html = '<div class="blt-table-scroll' + ( flush ? ' is-flush' : '' ) + '"><table class="widefat striped blt-perf-table' + ( cls ? ' ' + cls : '' ) + '"><thead><tr>';
 		headers = headers.map( function ( header ) {
 			return 'object' === typeof header ? header : { label: header };
 		} );
@@ -1045,8 +1046,10 @@
 			var categories = data.categories || {};
 			var html = '<div class="blt-card blt-perf-scorecard"><div class="blt-card-body"><div class="blt-perf-score">';
 
-			html += '<div class="blt-perf-overall">' + ring( scores.overall ) +
-				'<span class="blt-perf-overall-label">' + escapeHtml( t( 'overall' ) ) + '</span></div>';
+			var overall = Number( scores.overall ) || 0;
+			html += '<div class="blt-perf-overall">' + ring( overall ) +
+				'<span class="blt-perf-overall-label">' + escapeHtml( t( 'overall' ) ) + '</span>' +
+				badge( overall >= 90 ? t( 'psiGood' ) : ( overall >= 50 ? t( 'psiMid' ) : t( 'psiPoor' ) ), overall >= 90 ? 'blt-badge-confirmed' : ( overall >= 50 ? 'blt-badge-pending' : 'blt-badge-cancelled' ) ) + '</div>';
 
 			html += '<div class="blt-stats blt-perf-tiles" role="group" aria-label="' + escapeHtml( t( 'filterCategory' ) ) + '">';
 			Object.keys( categories ).forEach( function ( category ) {
@@ -1222,7 +1225,7 @@
 				{ label: 'CSS', cls: 'num' },
 				{ label: t( 'colErrors' ), cls: 'num' },
 				{ label: t( 'colPages' ), cls: 'num' }
-			], body, 'blt-perf-components' );
+			], body, 'blt-perf-components', true );
 			return html + '</div>';
 		},
 
@@ -1280,7 +1283,7 @@
 				{ label: t( 'colDom' ), cls: 'num' },
 				{ label: t( 'colRequests' ), cls: 'num' },
 				''
-			], body, 'blt-perf-pages' );
+			], body, 'blt-perf-pages', true );
 			return html + '</div>';
 		}
 	};

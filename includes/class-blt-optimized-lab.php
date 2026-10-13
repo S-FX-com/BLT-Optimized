@@ -1981,7 +1981,7 @@ class BLT_Optimized_Lab {
 	 */
 	private static function located_fix( $bricks, $post, $steps ) {
 		if ( is_array( $bricks ) && '' !== $bricks['edit_url'] ) {
-			return self::fix_link( __( 'Edit in Bricks', 'blt-optimized' ), $bricks['edit_url'], $steps );
+			return self::fix_link( __( 'Edit with Bricks', 'blt-optimized' ), $bricks['edit_url'], $steps );
 		}
 		if ( is_array( $post ) && ! empty( $post['edit_url'] ) && is_string( $post['edit_url'] ) ) {
 			return self::fix_link( __( 'Edit post', 'blt-optimized' ), esc_url_raw( $post['edit_url'] ), $steps );

@@ -582,7 +582,7 @@ class BLT_Optimized_Perf_Admin {
 						'labBricksElement'         => __( 'Bricks element %s', 'blt-optimized' ),
 						/* translators: %s: template or page title. */
 						'labBricksIn'              => __( 'in “%s”', 'blt-optimized' ),
-						'labEditBricks'            => __( 'Edit in Bricks', 'blt-optimized' ),
+						'labEditBricks'            => __( 'Edit with Bricks', 'blt-optimized' ),
 						'labBricksHeader'          => __( 'header template', 'blt-optimized' ),
 						'labBricksFooter'          => __( 'footer template', 'blt-optimized' ),
 						'labBricksComponent'       => __( 'component', 'blt-optimized' ),

@@ -408,7 +408,8 @@ class BLT_Optimized_Admin {
 	}
 
 	/**
-	 * Keep only absolute http(s) URLs on this site, one per line, max 10.
+	 * Keep only absolute http(s) URLs on this site, one per line, max 5
+	 * (the scan profiles at most 8 pages, automatic samples included).
 	 *
 	 * @param string $raw Textarea input.
 	 * @return string
@@ -421,7 +422,7 @@ class BLT_Optimized_Admin {
 				$urls[] = $url;
 			}
 		}
-		return implode( "\n", array_slice( array_unique( $urls ), 0, 10 ) );
+		return implode( "\n", array_slice( array_unique( $urls ), 0, 5 ) );
 	}
 
 	/* ------------------------------------------------------------------ */
@@ -1082,7 +1083,7 @@ class BLT_Optimized_Admin {
 							<div class="blt-field-label"><label for="blt-audit-urls"><?php esc_html_e( 'Extra pages to scan', 'blt-optimized' ); ?></label></div>
 							<div>
 								<textarea id="blt-audit-urls" name="<?php echo esc_attr( BLT_Optimized::OPTION_SETTINGS ); ?>[audit_urls]" rows="4" class="large-text code" placeholder="<?php echo esc_attr( home_url( '/contact/' ) ); ?>"><?php echo esc_textarea( $settings['audit_urls'] ); ?></textarea>
-								<p class="blt-field-desc"><?php esc_html_e( 'Full URLs on this site, one per line (up to 10).', 'blt-optimized' ); ?></p>
+								<p class="blt-field-desc"><?php esc_html_e( 'Full URLs on this site, one per line (up to 5). These are always included; automatic samples fill the remaining slots.', 'blt-optimized' ); ?></p>
 							</div>
 						</div>
 						<div class="blt-field">

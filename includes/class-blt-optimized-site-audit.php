@@ -17,7 +17,11 @@ defined( 'ABSPATH' ) || exit;
  * open admin page keeps ticking until the report is compiled — the same
  * pattern the disk scanner uses.
  *
- * Steps: health → media → pages → psi (when enabled) → compile.
+ * Steps: health → media → pages → lab (browser) → psi (when enabled) → compile.
+ *
+ * The lab step is the one the server can't do: the open admin page measures
+ * each profiled page in a visible iframe (see BLT_Optimized_Lab_Mode) and
+ * posts the results back, then tells the scan to move on.
  */
 class BLT_Optimized_Site_Audit {
 
@@ -81,6 +85,7 @@ class BLT_Optimized_Site_Audit {
 			'media'       => array(),
 			'pages'       => array(),
 			'psi'         => array(),
+			'lab_done'    => array(),
 			'errors'      => array(),
 			'started_at'  => 0,
 			'finished_at' => 0,
@@ -103,15 +108,20 @@ class BLT_Optimized_Site_Audit {
 	/**
 	 * Start a new scan.
 	 *
+	 * @param array $opts { lab: bool } — include the browser lab step. Only a
+	 *                    scan driven from an open admin page can run it.
 	 * @return array|WP_Error State, or an error when a scan is running.
 	 */
-	public function start() {
+	public function start( array $opts = array() ) {
 		$state = $this->get_state();
 		if ( 'running' === $state['status'] && ( time() - (int) $state['started_at'] ) < HOUR_IN_SECONDS ) {
 			return new WP_Error( 'blt_perf_running', __( 'A performance scan is already in progress.', 'blt-optimized' ) );
 		}
 
 		$steps = array( 'health', 'media', 'pages' );
+		if ( ! empty( $opts['lab'] ) ) {
+			$steps[] = 'lab';
+		}
 		if ( $this->plugin->psi->is_enabled() ) {
 			$steps[] = 'psi';
 		}
@@ -134,6 +144,7 @@ class BLT_Optimized_Site_Audit {
 			'media'       => array(),
 			'pages'       => array(),
 			'psi'         => array(),
+			'lab_done'    => array(),
 			'errors'      => array(),
 			'started_at'  => time(),
 			'finished_at' => 0,
@@ -181,6 +192,17 @@ class BLT_Optimized_Site_Audit {
 		while ( 'running' === $state['status'] && microtime( true ) < $deadline ) {
 			$step = isset( $state['steps'][ $state['step'] ] ) ? $state['steps'][ $state['step'] ] : 'compile';
 
+			// The browser runs the lab step; the server just waits for it.
+			if ( 'lab' === $step ) {
+				if ( ! $this->lab_queue( $state ) ) {
+					$state = $this->next_step( $state );
+					$this->save_state( $state );
+					continue;
+				}
+				$state['label'] = __( 'Measuring pages in your browser (lab test)…', 'blt-optimized' );
+				break;
+			}
+
 			try {
 				switch ( $step ) {
 					case 'health':
@@ -225,6 +247,7 @@ class BLT_Optimized_Site_Audit {
 		$labels = array(
 			'media'   => __( 'Auditing the media library for unused files…', 'blt-optimized' ),
 			'pages'   => __( 'Profiling front-end pages…', 'blt-optimized' ),
+			'lab'     => __( 'Measuring pages in your browser (lab test)…', 'blt-optimized' ),
 			'psi'     => __( 'Running Google PageSpeed Insights…', 'blt-optimized' ),
 			'compile' => __( 'Compiling the report…', 'blt-optimized' ),
 		);
@@ -379,6 +402,7 @@ class BLT_Optimized_Site_Audit {
 			(array) $state['health'],
 			isset( $state['media']['findings'] ) ? (array) $state['media']['findings'] : array(),
 			BLT_Optimized_Page_Findings::analyze( $pages ),
+			BLT_Optimized_Lab::findings( $pages ),
 			empty( $state['psi'] ) ? array() : BLT_Optimized_PSI::findings( (array) $state['psi'] )
 		);
 
@@ -434,6 +458,7 @@ class BLT_Optimized_Site_Audit {
 		$state['media']       = array();
 		$state['pages']       = array();
 		$state['psi']         = array();
+		$state['lab_done']    = array();
 		++$state['step'];
 
 		return $state;
@@ -488,7 +513,123 @@ class BLT_Optimized_Site_Audit {
 				+ count( isset( $html['iframes'] ) ? (array) $html['iframes'] : array() ),
 			'profiled'    => (bool) $profile,
 			'error'       => isset( $page['profile_error'] ) ? $page['profile_error'] : '',
+			'lab'         => empty( $page['lab'] ) ? null : BLT_Optimized_Lab::page_metrics( $page ),
 		);
+	}
+
+	/* ------------------------------------------------------------------ */
+	/* Lab step (driven by the browser)                                    */
+	/* ------------------------------------------------------------------ */
+
+	/**
+	 * Pages the browser still has to measure in this scan.
+	 *
+	 * @param array|null $state State (current when null).
+	 * @return array[] Each { url, label }.
+	 */
+	public function lab_queue( $state = null ) {
+		$state = is_array( $state ) ? $state : $this->get_state();
+		$done  = array_flip( (array) $state['lab_done'] );
+		$queue = array();
+		foreach ( (array) $state['pages'] as $page ) {
+			$status = isset( $page['http']['status'] ) ? (int) $page['http']['status'] : 0;
+			if ( isset( $done[ $page['url'] ] ) || ( $status && $status >= 400 ) ) {
+				continue;
+			}
+			$queue[] = array(
+				'url'   => $page['url'],
+				'label' => isset( $page['label'] ) ? $page['label'] : '',
+			);
+		}
+		return $queue;
+	}
+
+	/**
+	 * Attach a lab result to a page of the running scan.
+	 *
+	 * @param string $url      Page URL.
+	 * @param string $viewport mobile|desktop.
+	 * @param array  $lab      Sanitized lab result.
+	 * @return array|null The page report, or null when the scan has no such page.
+	 */
+	public function lab_store( $url, $viewport, array $lab ) {
+		$state = $this->get_state();
+		if ( 'running' !== $state['status'] ) {
+			return null;
+		}
+		foreach ( $state['pages'] as $i => $page ) {
+			if ( self::same_url( $page['url'], $url ) ) {
+				$state['pages'][ $i ]['lab'][ $viewport ] = $lab;
+				$state['lab_done'][]                      = $page['url'];
+				$state['lab_done']                        = array_values( array_unique( $state['lab_done'] ) );
+				$this->save_state( $state );
+				return $state['pages'][ $i ];
+			}
+		}
+		return null;
+	}
+
+	/**
+	 * The browser finished (or gave up on) the lab step: move on.
+	 *
+	 * @return array State.
+	 */
+	public function lab_done() {
+		$state = $this->get_state();
+		$steps = (array) $state['steps'];
+		if ( 'running' === $state['status'] && isset( $steps[ $state['step'] ] ) && 'lab' === $steps[ $state['step'] ] ) {
+			$state = $this->next_step( $state );
+			$this->save_state( $state );
+		}
+		return $state;
+	}
+
+	/**
+	 * Attach a lab result measured from the Page Profiler to the stored page
+	 * report for that URL (creating a minimal one when none exists).
+	 *
+	 * @param string $url      Page URL.
+	 * @param string $viewport mobile|desktop.
+	 * @param array  $lab      Sanitized lab result.
+	 * @return array The page report.
+	 */
+	public function remember_lab( $url, $viewport, array $lab ) {
+		$pages = $this->get_pages();
+		$key   = null;
+		foreach ( $pages as $k => $page ) {
+			if ( self::same_url( $page['url'], $url ) ) {
+				$key = $k;
+				break;
+			}
+		}
+		if ( null === $key ) {
+			$key           = md5( $url );
+			$pages[ $key ] = array(
+				'url'        => $url,
+				'label'      => '',
+				'fetched_at' => time(),
+				'profile'    => null,
+			);
+		}
+		$pages[ $key ]['lab'][ $viewport ] = $lab;
+		update_option( self::PAGES_OPTION, array_slice( $pages, -12, null, true ), false );
+		return $pages[ $key ];
+	}
+
+	/**
+	 * Same page, ignoring a trailing slash and the scheme/host case.
+	 *
+	 * @param string $a URL.
+	 * @param string $b URL.
+	 * @return bool
+	 */
+	public static function same_url( $a, $b ) {
+		$norm = static function ( $url ) {
+			$url = strtolower( (string) $url );
+			$url = preg_replace( '#^https?://#', '', $url );
+			return untrailingslashit( preg_replace( '#/(\?|$)#', '$1', $url ) );
+		};
+		return $norm( $a ) === $norm( $b );
 	}
 
 	/**

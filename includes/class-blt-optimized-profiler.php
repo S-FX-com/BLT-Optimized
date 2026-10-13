@@ -136,6 +136,10 @@ class BLT_Optimized_Profiler {
 	 */
 	public static function maybe_start(): void {
 		if ( ! isset( $_GET[ self::QUERY_ARG ] ) ) { // phpcs:ignore WordPress.Security.NonceVerification.Recommended -- the single-use token is the credential.
+			// The built-in lab test's requests carry their own token.
+			if ( isset( $_GET['blt_optimized_lab'] ) ) { // phpcs:ignore WordPress.Security.NonceVerification.Recommended -- the single-use token is the credential.
+				BLT_Optimized_Lab_Mode::start();
+			}
 			return;
 		}
 		$token = $_GET[ self::QUERY_ARG ]; // phpcs:ignore WordPress.Security.NonceVerification.Recommended, WordPress.Security.ValidatedSanitizedInput.InputNotSanitized, WordPress.Security.ValidatedSanitizedInput.MissingUnslash -- shape-checked only; the collector validates it fully.

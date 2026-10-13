@@ -390,7 +390,8 @@ class BLT_Optimized_Admin {
 		// Optional image-optimization module.
 		$clean['enable_images'] = empty( $input['enable_images'] ) ? 0 : 1;
 
-		// Performance scan: opt-in PageSpeed Insights + extra URLs.
+		// Performance scan: built-in lab test, opt-in PageSpeed Insights, extra URLs.
+		$clean['enable_lab'] = empty( $input['enable_lab'] ) ? 0 : 1;
 		$clean['enable_psi'] = empty( $input['enable_psi'] ) ? 0 : 1;
 		if ( isset( $input['psi_api_key'] ) ) {
 			$clean['psi_api_key'] = preg_replace( '/[^A-Za-z0-9_\-]/', '', (string) $input['psi_api_key'] );
@@ -1087,6 +1088,19 @@ class BLT_Optimized_Admin {
 							<div>
 								<textarea id="blt-audit-urls" name="<?php echo esc_attr( BLT_Optimized::OPTION_SETTINGS ); ?>[audit_urls]" rows="4" class="large-text code" placeholder="<?php echo esc_attr( home_url( '/contact/' ) ); ?>"><?php echo esc_textarea( $settings['audit_urls'] ); ?></textarea>
 								<p class="blt-field-desc"><?php esc_html_e( 'Full URLs on this site, one per line (up to 5). These are always included; automatic samples fill the remaining slots.', 'blt-optimized' ); ?></p>
+							</div>
+						</div>
+						<div class="blt-field">
+							<div class="blt-field-label"><?php esc_html_e( 'Lab test', 'blt-optimized' ); ?></div>
+							<div>
+								<label class="blt-toggle">
+									<input type="checkbox" name="<?php echo esc_attr( BLT_Optimized::OPTION_SETTINGS ); ?>[enable_lab]" value="1" <?php checked( ! empty( $settings['enable_lab'] ) ); ?> />
+									<span class="blt-toggle-track" aria-hidden="true"><span class="blt-toggle-thumb"></span></span>
+									<span class="blt-toggle-text">
+										<span class="blt-toggle-label"><?php esc_html_e( 'Measure Core Web Vitals in your browser during scans', 'blt-optimized' ); ?></span>
+										<span class="blt-toggle-desc"><?php esc_html_e( 'Loads each scanned page in a frame on the scan screen and reads the browser\'s own performance data: LCP and its element, layout shifts, blocking time per script, render-blocking files, unused CSS and oversized images. No API key or outside service, and it works on local and staging sites. Timings are unthrottled, so they come out faster than PageSpeed\'s simulated phone.', 'blt-optimized' ); ?></span>
+									</span>
+								</label>
 							</div>
 						</div>
 						<div class="blt-field">

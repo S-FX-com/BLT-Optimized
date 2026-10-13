@@ -56,6 +56,9 @@ class BLT_Optimized_Perf_Admin {
 			'perf_pages'    => 'ajax_pages',
 			'perf_page'     => 'ajax_page',
 			'perf_psi'      => 'ajax_psi',
+			'perf_lab_token' => 'ajax_lab_token',
+			'perf_lab_store' => 'ajax_lab_store',
+			'perf_lab_done'  => 'ajax_lab_done',
 			'rule_add'      => 'ajax_rule_add',
 			'rule_toggle'   => 'ajax_rule_toggle',
 			'rule_delete'   => 'ajax_rule_delete',
@@ -501,7 +504,8 @@ class BLT_Optimized_Perf_Admin {
 	 */
 	public function ajax_start() {
 		$this->admin->verify_ajax();
-		$state = $this->plugin->site_audit->start();
+		$settings = BLT_Optimized::get_settings();
+		$state    = $this->plugin->site_audit->start( array( 'lab' => ! empty( $settings['enable_lab'] ) ) );
 		if ( is_wp_error( $state ) ) {
 			wp_send_json_error( array( 'message' => $state->get_error_message() ) );
 		}
@@ -565,6 +569,9 @@ class BLT_Optimized_Perf_Admin {
 			'pagesTotal' => $urls,
 			'errors'     => array_values( (array) $state['errors'] ),
 			'startedAt'  => (int) $state['started_at'],
+			'labQueue'   => ( 'running' === $state['status'] && isset( $steps[ $step ] ) && 'lab' === $steps[ $step ] )
+				? $this->plugin->site_audit->lab_queue( $state )
+				: array(),
 		);
 	}
 
@@ -772,6 +779,86 @@ class BLT_Optimized_Perf_Admin {
 				'findings' => BLT_Optimized_Findings::sort( BLT_Optimized_PSI::findings( array( $result ) ) ),
 			)
 		);
+	}
+
+	/* ------------------------------------------------------------------ */
+	/* AJAX: built-in lab test                                             */
+	/* ------------------------------------------------------------------ */
+
+	/**
+	 * Issue a lab token for a page and return the URL to load in the iframe.
+	 *
+	 * @return void
+	 */
+	public function ajax_lab_token() {
+		$this->admin->verify_ajax();
+		$url = $this->lab_url_arg();
+		wp_send_json_success(
+			array(
+				'url' => $url,
+				'src' => BLT_Optimized_Lab_Mode::create_url( $url ),
+			)
+		);
+	}
+
+	/**
+	 * Store a lab measurement posted by the browser.
+	 *
+	 * POST: url, viewport (mobile|desktop), payload (JSON), scan (0|1).
+	 *
+	 * @return void
+	 */
+	public function ajax_lab_store() {
+		$this->admin->verify_ajax();
+
+		// phpcs:disable WordPress.Security.NonceVerification.Missing -- verify_ajax().
+		$url      = $this->lab_url_arg();
+		$viewport = isset( $_POST['viewport'] ) && 'desktop' === $_POST['viewport'] ? 'desktop' : 'mobile';
+		$scan     = ! empty( $_POST['scan'] );
+		$raw      = isset( $_POST['payload'] ) ? wp_unslash( $_POST['payload'] ) : ''; // phpcs:ignore WordPress.Security.ValidatedSanitizedInput.InputNotSanitized -- decoded and validated field by field by BLT_Optimized_Lab::sanitize().
+		// phpcs:enable
+
+		$lab = BLT_Optimized_Lab::sanitize( $raw, $url, $viewport );
+		if ( is_wp_error( $lab ) ) {
+			wp_send_json_error( array( 'message' => $lab->get_error_message() ) );
+		}
+
+		$page = $scan ? $this->plugin->site_audit->lab_store( $url, $viewport, $lab ) : null;
+		if ( null === $page ) {
+			$page = $this->plugin->site_audit->remember_lab( $url, $viewport, $lab );
+		}
+
+		wp_send_json_success(
+			array(
+				'lab'      => $lab,
+				'summary'  => BLT_Optimized_Lab::summary( $lab ),
+				'findings' => BLT_Optimized_Findings::sort( BLT_Optimized_Lab::findings( array( $page ) ) ),
+			)
+		);
+	}
+
+	/**
+	 * The browser finished the scan's lab step.
+	 *
+	 * @return void
+	 */
+	public function ajax_lab_done() {
+		$this->admin->verify_ajax();
+		wp_send_json_success( $this->progress( $this->plugin->site_audit->lab_done() ) );
+	}
+
+	/**
+	 * The posted page URL, which must be on this site.
+	 *
+	 * @return string
+	 */
+	private function lab_url_arg() {
+		$url  = isset( $_POST['url'] ) ? esc_url_raw( wp_unslash( $_POST['url'] ), array( 'http', 'https' ) ) : ''; // phpcs:ignore WordPress.Security.NonceVerification.Missing -- verify_ajax() by every caller.
+		$host = BLT_Optimized_Components::url_host( $url );
+		if ( '' === $url || '' === $host || ! BLT_Optimized_Components::is_local_host( $host ) ) {
+			wp_send_json_error( array( 'message' => __( 'Enter a URL on this site.', 'blt-optimized' ) ) );
+		}
+		return remove_query_arg( array( BLT_Optimized_Lab_Mode::QUERY_ARG, BLT_Optimized_Profiler::QUERY_ARG ), $url );
 	}
 
 	/* ------------------------------------------------------------------ */

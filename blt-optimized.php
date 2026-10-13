@@ -464,6 +464,7 @@ final class BLT_Optimized {
 			'show_top_menu'      => 1, // Top-level admin menu.
 			'show_tools_menu'    => 0, // Entry under the Tools menu.
 			'enable_images'      => 0, // Optional image-optimization module (off by default).
+			'enable_lab'         => 1, // Built-in lab test: measure pages in the admin's browser during scans (no external service).
 			'enable_psi'         => 0, // Google PageSpeed Insights lab data in the performance scan (off by default: sends URLs to Google).
 			'psi_api_key'        => '',
 			'audit_urls'         => '', // Extra URLs for the performance scan, one per line.

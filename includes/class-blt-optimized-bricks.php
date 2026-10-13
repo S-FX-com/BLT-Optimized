@@ -308,42 +308,42 @@ class BLT_Optimized_Bricks {
 		$defs = array(
 			array(
 				'id'      => 'bricks-fontawesome',
-				'label'   => 'Font Awesome (Bricks)',
+				'label'   => 'Font Awesome icons',
 				'handles' => array( 'bricks-font-awesome-6', 'bricks-font-awesome-6-brands' ),
 				'tokens'  => array( 'fa-', '=fas', '=far', '=fab', '=fa' ),
 				'without' => __( 'any Font Awesome icons', 'blt-optimized' ),
 			),
 			array(
 				'id'      => 'bricks-ionicons',
-				'label'   => 'Ionicons (Bricks)',
+				'label'   => 'Ionicons',
 				'handles' => array( 'bricks-ionicons' ),
 				'tokens'  => array( 'ion-', '=ion' ),
 				'without' => __( 'any Ionicons icons', 'blt-optimized' ),
 			),
 			array(
 				'id'      => 'bricks-themify',
-				'label'   => 'Themify icons (Bricks)',
+				'label'   => 'Themify icons',
 				'handles' => array( 'bricks-themify-icons' ),
 				'tokens'  => array( 'ti-', '=ti' ),
 				'without' => __( 'any Themify icons', 'blt-optimized' ),
 			),
 			array(
 				'id'      => 'bricks-splide',
-				'label'   => 'Splide (Bricks nestable sliders)',
+				'label'   => 'Splide sliders',
 				'handles' => array( 'bricks-splide' ),
 				'tokens'  => array( 'splide', '=brxe-slider-nested' ),
 				'without' => __( 'a nestable slider element', 'blt-optimized' ),
 			),
 			array(
 				'id'      => 'bricks-leaflet',
-				'label'   => 'Leaflet (Bricks maps)',
+				'label'   => 'Leaflet maps',
 				'handles' => array( 'bricks-leaflet' ),
 				'tokens'  => array( 'leaflet-', '=brxe-map-leaflet' ),
 				'without' => __( 'a Leaflet map element', 'blt-optimized' ),
 			),
 			array(
 				'id'      => 'bricks-prettify',
-				'label'   => 'Code prettifier (Bricks)',
+				'label'   => 'Code prettifier',
 				'handles' => array( 'bricks-prettify' ),
 				'tokens'  => array( 'prettyprint', '=brxe-code' ),
 				'without' => __( 'a code element', 'blt-optimized' ),
@@ -1610,7 +1610,7 @@ class BLT_Optimized_Bricks {
 						size_format( $bytes, 1 ),
 						'uploads/bricks/css'
 					),
-					'summary'  => __( 'With the External files CSS method Bricks writes one post-{ID}.min.css file per page or template, and nothing removes the file when that post is deleted or stops using Bricks. These files belong to posts that no longer exist or no longer have any Bricks data, so no page can load them. They are small, but they pile up on sites that build and delete many pages, and they bloat backups and file listings. Deleting them is safe: Bricks regenerates a file whenever a post that needs one is saved or when you click “Regenerate CSS files”.', 'blt-optimized' ) . ( $more ? ' ' . sprintf(
+					'summary'  => __( 'With the External files CSS method Bricks writes one post-{ID}.min.css file per page or template, and nothing removes the file when that post is deleted or stops using Bricks. These files belong to posts that no longer exist or no longer have any Bricks data, so Bricks has no reason to load them. They are small, but they pile up on sites that build and delete many pages, and they bloat backups and file listings. Deleting them is safe: Bricks regenerates a file whenever a post that needs one is saved or when you click “Regenerate CSS files”.', 'blt-optimized' ) . ( $more ? ' ' . sprintf(
 						/* translators: %d: files not covered by one click. */
 						__( 'One click deletes the first %d; run the scan again for the rest.', 'blt-optimized' ),
 						self::FIX_MAX_ITEMS
@@ -1841,6 +1841,11 @@ class BLT_Optimized_Bricks {
 	 * @return void
 	 */
 	private function store_orphans( array $css ) {
+		// Nothing to remember and nothing stale to replace: do not write the option at all.
+		if ( empty( $css['orphans'] ) && false === get_option( self::ORPHAN_OPTION, false ) ) {
+			return;
+		}
+
 		$stored = array(
 			'checked_at' => time(),
 			'files'      => array(),

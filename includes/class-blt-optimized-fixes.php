@@ -374,6 +374,9 @@ class BLT_Optimized_Fixes {
 			'sidebars_widgets',
 			'widget_*',
 			'theme_mods_*',
+			// Bricks Builder reads its global settings, classes, styles and
+			// palettes on every page; out of autoload they'd cost a query each.
+			'bricks_*',
 			'template',
 			'stylesheet',
 			'siteurl',

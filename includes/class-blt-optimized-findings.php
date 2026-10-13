@@ -36,7 +36,7 @@ defined( 'ABSPATH' ) || exit;
  *                          steps: string   (for type=manual: plain-text instructions),
  *                          destructive: bool (deletes data — UI demands backup ack),
  *                          confirm: string (confirmation prompt text) }.
- *   source    string  health|profiler|media|psi|disk.
+ *   source    string  health|profiler|media|psi|disk|lab|bricks.
  */
 class BLT_Optimized_Findings {
 

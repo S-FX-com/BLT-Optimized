@@ -34,6 +34,7 @@ delete_option( 'blt_optimized_media_audit' );
 delete_option( 'blt_optimized_media_audit_state' );
 delete_option( 'blt_optimized_tweaks' );
 delete_option( 'blt_optimized_autoload_changes' );
+delete_option( 'blt_optimized_bricks_css_orphans' );
 
 // Image module options. NOTE: option key differs by one letter from the base
 // (`blt_optimizer_*` vs `blt_optimized_*`) — this is intentional, not a typo.

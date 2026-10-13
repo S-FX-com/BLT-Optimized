@@ -14,6 +14,14 @@
  * Plain ES5, no dependencies. It never modifies the page and never throws
  * into it: every step is wrapped, and a step that fails leaves its slice of
  * the payload empty rather than losing the whole measurement.
+ *
+ * Framed in the admin page (the normal case), Chrome delivers paint, LCP,
+ * layout-shift, long-task and resource entries to this frame's observers but
+ * reports long animation frames only to the top-level page, so loaf[] is
+ * empty here and the admin-side runner (assets/performance.js) fills it in
+ * from the entries naming this frame's scripts. Opened as a top-level page,
+ * the observer collects them itself. Other browsers lack some entry types;
+ * collect() says which in warnings[].
  */
 ( function () {
 	'use strict';

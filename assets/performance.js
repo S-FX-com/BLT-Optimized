@@ -854,13 +854,13 @@
 			}
 
 			function teardown() {
-					window.clearTimeout( run.timer );
-					if ( run.loafWatch ) {
-						try {
-							run.loafWatch.disconnect();
-						} catch ( e ) {}
-						run.loafWatch = null;
-					}
+				window.clearTimeout( run.timer );
+				if ( run.loafWatch ) {
+					try {
+						run.loafWatch.disconnect();
+					} catch ( e ) {}
+					run.loafWatch = null;
+				}
 				$( window ).off( ns );
 				$( document ).off( ns );
 				if ( run.frame ) {
@@ -917,74 +917,74 @@
 			}
 
 			// A frame's own observer is not told about its long animation frames (Chrome reports them
-				// to the top-level page, naming the frame that ran each script), so this page watches them
-				// and keeps the ones that ran the framed page's scripts.
-				function watchLoaf() {
-					run.loafEntries = [];
-					try {
-						var types = window.PerformanceObserver && window.PerformanceObserver.supportedEntryTypes;
-						if ( types && types.indexOf( 'long-animation-frame' ) > -1 ) {
-							run.loafWatch = new window.PerformanceObserver( function ( list ) {
-								run.loafEntries = run.loafEntries.concat( list.getEntries() );
-							} );
-							run.loafWatch.observe( { type: 'long-animation-frame' } );
-						}
-					} catch ( e ) {
-						run.loafWatch = null;
+			// to the top-level page, naming the frame that ran each script), so this page watches them
+			// and keeps the ones that ran the framed page's scripts.
+			function watchLoaf() {
+				run.loafEntries = [];
+				try {
+					var types = window.PerformanceObserver && window.PerformanceObserver.supportedEntryTypes;
+					if ( types && types.indexOf( 'long-animation-frame' ) > -1 ) {
+						run.loafWatch = new window.PerformanceObserver( function ( list ) {
+							run.loafEntries = run.loafEntries.concat( list.getEntries() );
+						} );
+						run.loafWatch.observe( { type: 'long-animation-frame' } );
 					}
+				} catch ( e ) {
+					run.loafWatch = null;
 				}
+			}
 
-				function framedLoaf( win ) {
-					var frames = [];
-					if ( run.loafWatch ) {
-						run.loafEntries = run.loafEntries.concat( run.loafWatch.takeRecords() );
-					}
-					// Times in the payload are relative to the framed page's own navigation start.
-					var offset = window.performance.timeOrigin - win.performance.timeOrigin;
-					run.loafEntries.forEach( function ( entry ) {
-						var scripts = [];
-						var all = 0;
-						var own = 0;
-						( entry.scripts || [] ).forEach( function ( script ) {
-							var mine = false;
-							try {
-								mine = script.window === win;
-							} catch ( e ) {}
-							all += Number( script.duration ) || 0;
-							if ( mine ) {
-								own += Number( script.duration ) || 0;
-								scripts.push( {
-									url: String( script.sourceURL || '' ).replace( /([?&])blt_lab=[^&#]*&?/, '$1' ).replace( /[?&]$/, '' ),
-									fn: String( script.sourceFunctionName || '' ),
-									invoker: String( script.invoker || '' ).replace( /([?&])blt_lab=[^&#]*&?/, '$1' ).replace( /[?&]$/, '' ),
-									invokerType: String( script.invokerType || '' ),
-									duration: Math.round( ( Number( script.duration ) || 0 ) * 10 ) / 10,
-									forcedLayout: Math.round( ( Number( script.forcedStyleAndLayoutDuration ) || 0 ) * 10 ) / 10
-								} );
-							}
-						} );
-						if ( ! scripts.length ) {
-							return;
+			function framedLoaf( win ) {
+				var frames = [];
+				if ( run.loafWatch ) {
+					run.loafEntries = run.loafEntries.concat( run.loafWatch.takeRecords() );
+				}
+				// Times in the payload are relative to the framed page's own navigation start.
+				var offset = window.performance.timeOrigin - win.performance.timeOrigin;
+				run.loafEntries.forEach( function ( entry ) {
+					var scripts = [];
+					var all = 0;
+					var own = 0;
+					( entry.scripts || [] ).forEach( function ( script ) {
+						var mine = false;
+						try {
+							mine = script.window === win;
+						} catch ( e ) {}
+						all += Number( script.duration ) || 0;
+						if ( mine ) {
+							own += Number( script.duration ) || 0;
+							scripts.push( {
+								url: String( script.sourceURL || '' ).replace( /([?&])blt_lab=[^&#]*&?/, '$1' ).replace( /[?&]$/, '' ),
+								fn: String( script.sourceFunctionName || '' ),
+								invoker: String( script.invoker || '' ).replace( /([?&])blt_lab=[^&#]*&?/, '$1' ).replace( /[?&]$/, '' ),
+								invokerType: String( script.invokerType || '' ),
+								duration: Math.round( ( Number( script.duration ) || 0 ) * 10 ) / 10,
+								forcedLayout: Math.round( ( Number( script.forcedStyleAndLayoutDuration ) || 0 ) * 10 ) / 10
+							} );
 						}
-						// A frame shared with this admin page's own scripts is only charged for the framed page's share.
-						var shared = own < all - 0.5;
-						scripts.sort( function ( a, b ) {
-							return b.duration - a.duration;
-						} );
-						frames.push( {
-							start: Math.max( 0, Math.round( ( entry.startTime + offset ) * 10 ) / 10 ),
-							duration: Math.round( ( shared ? own : entry.duration ) * 10 ) / 10,
-							blocking: Math.round( ( shared ? entry.blockingDuration * ( own / all ) : entry.blockingDuration ) * 10 ) / 10,
-							scripts: scripts.slice( 0, 12 )
-						} );
 					} );
-					frames.sort( function ( a, b ) {
+					if ( ! scripts.length ) {
+						return;
+					}
+					// A frame shared with this admin page's own scripts is only charged for the framed page's share.
+					var shared = own < all - 0.5;
+					scripts.sort( function ( a, b ) {
 						return b.duration - a.duration;
 					} );
-					return frames.slice( 0, 20 );
-				}
+					frames.push( {
+						start: Math.max( 0, Math.round( ( entry.startTime + offset ) * 10 ) / 10 ),
+						duration: Math.round( ( shared ? own : entry.duration ) * 10 ) / 10,
+						blocking: Math.round( ( shared ? entry.blockingDuration * ( own / all ) : entry.blockingDuration ) * 10 ) / 10,
+						scripts: scripts.slice( 0, 12 )
+					} );
+				} );
+				frames.sort( function ( a, b ) {
+					return b.duration - a.duration;
+				} );
+				return frames.slice( 0, 20 );
+			}
 
-				function addWarning( payload, code ) {
+			function addWarning( payload, code ) {
 				payload.warnings = Array.isArray( payload.warnings ) ? payload.warnings : [];
 				if ( payload.warnings.indexOf( code ) < 0 ) {
 					payload.warnings.push( code );
@@ -1135,9 +1135,9 @@
 					tabindex: -1
 				} );
 				run.frame = $frame[ 0 ];
-					opts.$mount.find( '.blt-lab-frame' ).append( $frame );
-					labRunner.fit( opts.$mount, viewport );
-					run.loaded = false;
+				opts.$mount.find( '.blt-lab-frame' ).append( $frame );
+				labRunner.fit( opts.$mount, viewport );
+				run.loaded = false;
 				run.loadedAt = 0;
 				run.offscreen = false;
 				run.hiddenSeen = 'hidden' === document.visibilityState;
@@ -1161,12 +1161,12 @@
 
 			function attempt() {
 				if ( run.aborted ) {
-						return;
-					}
-					// The panel shows straight away, so a wait for the token or for the tab is visible too.
-					run.$phase = labRunner.buildStage( opts, viewport );
-					// A background tab can't paint: don't start until it is visible.
-					if ( 'hidden' === document.visibilityState ) {
+					return;
+				}
+				// The panel shows straight away, so a wait for the token or for the tab is visible too.
+				run.$phase = labRunner.buildStage( opts, viewport );
+				// A background tab can't paint: don't start until it is visible.
+				if ( 'hidden' === document.visibilityState ) {
 					phase( 'hidden' );
 					$( document ).one( 'visibilitychange' + ns, attempt );
 					return;
@@ -1521,25 +1521,30 @@
 			return causes;
 		},
 
-		// The Bricks element (and the template or page it lives in) behind a selector, when the server found it.
+		// The Bricks element (and the template or page it lives in) behind a selector, when the server found it:
+		// { post_id, post_title, post_type, template_type, area: content|header|footer|component, element_name, edit_url, label }.
 		bricksHtml: function ( info, id ) {
-			var parts = [];
-			if ( info && 'object' === typeof info ) {
-				var name = info.label || info.name || info.element_label || info.element_name || info.element || info.type;
-				var where = info.template_title || info.template_name || info.template || info.post_title || info.title ||
-					( info.post && ( info.post.title || info.post.name ) ) || ( info.source && ( info.source.title || info.source.name ) ) || '';
-				var edit = info.edit_url || info.editUrl || info.edit_link || info.url ||
-					( info.post && info.post.edit_url ) || ( info.source && info.source.edit_url ) || '';
-				var text = tf( 'labBricksElement', name && 'object' !== typeof name ? name : ( id ? 'brxe-' + id : '' ) );
-				parts.push( escapeHtml( text ) );
-				if ( where && 'object' !== typeof where ) {
-					var label = tf( 'labBricksIn', where );
-					parts.push( safeUrl( edit ) ? '<a href="' + escapeHtml( safeUrl( edit ) ) + '">' + escapeHtml( label ) + '</a> <a class="button button-small" href="' + escapeHtml( safeUrl( edit ) ) + '">' + escapeHtml( t( 'labEditBricks' ) ) + '</a>' : escapeHtml( label ) );
-				} else if ( safeUrl( edit ) ) {
-					parts.push( '<a class="button button-small" href="' + escapeHtml( safeUrl( edit ) ) + '">' + escapeHtml( t( 'labEditBricks' ) ) + '</a>' );
-				}
-			} else if ( id ) {
-				parts.push( escapeHtml( tf( 'labBricksElement', 'brxe-' + id ) ) );
+			if ( ! info || 'object' !== typeof info || ! ( info.label || info.element_name || info.post_title ) ) {
+				return id ? escapeHtml( tf( 'labBricksElement', 'brxe-' + id ) ) : '';
+			}
+			var label = info.label && 'object' !== typeof info.label ? String( info.label ) : '';
+			var type = info.element_name && 'object' !== typeof info.element_name ? String( info.element_name ) : '';
+			var name = label || type || ( id ? 'brxe-' + id : '' );
+			if ( label && type && label !== type ) {
+				name += ' (' + type + ')';
+			}
+			var parts = [ escapeHtml( tf( 'labBricksElement', name ) ) ];
+
+			var title = info.post_title && 'object' !== typeof info.post_title ? String( info.post_title ) : '';
+			var edit = safeUrl( info.edit_url );
+			if ( title ) {
+				var kinds = { header: t( 'labBricksHeader' ), footer: t( 'labBricksFooter' ), component: t( 'labBricksComponent' ) };
+				var kind = info.in_component ? t( 'labBricksComponent' ) : ( kinds[ info.area ] || ( 'bricks_template' === info.post_type ? t( 'labBricksTemplate' ) : String( info.post_type || '' ) ) );
+				var where = tf( 'labBricksIn', title ) + ( kind ? ' (' + kind + ')' : '' );
+				parts.push( edit ? '<a href="' + escapeHtml( edit ) + '">' + escapeHtml( where ) + '</a>' : escapeHtml( where ) );
+			}
+			if ( edit ) {
+				parts.push( '<a class="button button-small" href="' + escapeHtml( edit ) + '">' + escapeHtml( t( 'labEditBricks' ) ) + '</a>' );
 			}
 			return parts.join( ' · ' );
 		},
@@ -3346,8 +3351,8 @@
 
 		selectTab: function ( id, focus ) {
 			if ( profiler.tabs.indexOf( id ) < 0 ) {
-					id = profiler.tabs[ 0 ];
-				}
+				id = profiler.tabs[ 0 ];
+			}
 			profiler.activeTab = id;
 			$( '#blt-profiler-result .blt-perf-subtab' ).each( function () {
 				var active = $( this ).attr( 'data-tab' ) === id;

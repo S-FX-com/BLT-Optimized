@@ -96,10 +96,10 @@ class BLT_Optimized_Lab {
 	const LCP_WASTED_MIN_BYTES = 20 * KB_IN_BYTES;
 
 	// CLS.
-	const CLS_MIN_SHARE       = 0.02;
-	const CLS_MAX_FINDINGS    = 4;
-	const CLS_FONT_WINDOW_MS  = 400;
-	const CLS_LATE_AFTER_MS   = 300;
+	const CLS_MIN_SHARE      = 0.02;
+	const CLS_MAX_FINDINGS   = 4;
+	const CLS_FONT_WINDOW_MS = 400;
+	const CLS_LATE_AFTER_MS  = 300;
 
 	// Images.
 	const OVERSIZED_RATIO        = 1.5;
@@ -199,6 +199,20 @@ class BLT_Optimized_Lab {
 	 * @return array { lcp, cls, tbt, fcp, ttfb, load, ratings, bytes, requests, blocking_count, unused_css_bytes, dom_nodes, warnings }
 	 */
 	public static function summary( array $lab ) {
+		try {
+			return self::summarize( $lab );
+		} catch ( \Throwable $e ) {
+			return self::summarize( array() );
+		}
+	}
+
+	/**
+	 * The work of summary().
+	 *
+	 * @param array $lab Lab result.
+	 * @return array
+	 */
+	private static function summarize( array $lab ) {
 		$nav = self::g( $lab, 'nav' );
 
 		$lcp  = self::metric( self::g( self::g( $lab, 'lcp' ), 'time' ) );
@@ -228,19 +242,22 @@ class BLT_Optimized_Lab {
 				++$blocking;
 			}
 			$size = self::resource_size( $resource );
-			$kind = isset( $resource['kind'] ) && isset( $bytes[ $resource['kind'] ] ) ? $resource['kind'] : self::kind_of( $resource );
-			if ( ! isset( $bytes[ $kind ] ) ) {
+			$kind = self::s( $resource, 'kind' );
+			if ( ! isset( $bytes[ $kind ] ) || 'total' === $kind ) {
+				$kind = self::kind_of( $resource );
+			}
+			if ( ! isset( $bytes[ $kind ] ) || 'total' === $kind ) {
 				$kind = 'other';
 			}
-			$bytes[ $kind ]  += $size;
-			$bytes['total']  += $size;
+			$bytes[ $kind ] += $size;
+			$bytes['total'] += $size;
 		}
 
 		// The HTML document itself (resource timing does not list it).
 		if ( is_array( $nav ) ) {
-			$doc = (int) self::g( $nav, 'transfer', 0 );
+			$doc = self::i( $nav, 'transfer' );
 			if ( $doc <= 0 ) {
-				$doc = (int) self::g( $nav, 'encoded', 0 );
+				$doc = self::i( $nav, 'encoded' );
 			}
 			if ( $doc > 0 || $requests > 0 ) {
 				++$requests;
@@ -252,7 +269,7 @@ class BLT_Optimized_Lab {
 		$unused = 0;
 		foreach ( (array) self::g( $lab, 'css', array() ) as $sheet ) {
 			if ( is_array( $sheet ) && ! empty( $sheet['accessible'] ) ) {
-				$unused += (int) self::g( $sheet, 'unusedBytes', 0 );
+				$unused += self::i( $sheet, 'unusedBytes' );
 			}
 		}
 
@@ -276,8 +293,8 @@ class BLT_Optimized_Lab {
 			'requests'         => $requests,
 			'blocking_count'   => $blocking,
 			'unused_css_bytes' => $unused,
-			'dom_nodes'        => is_numeric( $nodes ) ? (int) $nodes : null,
-			'warnings'         => array_values( array_filter( array_map( 'strval', (array) self::g( $lab, 'warnings', array() ) ) ) ),
+			'dom_nodes'        => ( is_int( $nodes ) || is_float( $nodes ) ) && is_finite( $nodes ) ? (int) $nodes : null,
+			'warnings'         => array_values( array_filter( (array) self::g( $lab, 'warnings', array() ), 'is_string' ) ),
 		);
 	}
 
@@ -534,8 +551,8 @@ class BLT_Optimized_Lab {
 			$end   = self::to_num( self::g( $res, 'end' ), 0, self::MAX_TIME_MS );
 			if ( null !== $start && null !== $end ) {
 				$resource = array(
-					'start'               => $start,
-					'end'                 => $end,
+					'start'                => $start,
+					'end'                  => $end,
 					'renderBlockingBefore' => self::to_int( self::g( $res, 'renderBlockingBefore' ), 0, 1000 ),
 				);
 			}
@@ -677,13 +694,13 @@ class BLT_Optimized_Lab {
 					$component = self::component_for( $url );
 				}
 				$scripts[] = array(
-					'url'         => $url,
-					'fn'          => self::to_str( self::g( $script, 'fn' ), 100, true ),
-					'invoker'     => self::to_str( self::g( $script, 'invoker' ), 200, true ),
-					'invokerType' => self::to_token( self::g( $script, 'invokerType' ), 40 ),
-					'duration'    => (float) self::to_num( self::g( $script, 'duration' ), 0, self::MAX_TIME_MS, 1, 0 ),
+					'url'          => $url,
+					'fn'           => self::to_str( self::g( $script, 'fn' ), 100, true ),
+					'invoker'      => self::to_str( self::g( $script, 'invoker' ), 200, true ),
+					'invokerType'  => self::to_token( self::g( $script, 'invokerType' ), 40 ),
+					'duration'     => (float) self::to_num( self::g( $script, 'duration' ), 0, self::MAX_TIME_MS, 1, 0 ),
 					'forcedLayout' => (float) self::to_num( self::g( $script, 'forcedLayout' ), 0, self::MAX_TIME_MS, 1, 0 ),
-					'component'   => $component,
+					'component'    => $component,
 				);
 			}
 			$out[] = array(
@@ -712,9 +729,9 @@ class BLT_Optimized_Lab {
 			if ( '' === $url ) {
 				continue;
 			}
-			$transfer = self::to_int( self::g( $resource, 'transfer' ), 0, self::MAX_BYTES );
-			$encoded  = self::to_int( self::g( $resource, 'encoded' ), 0, self::MAX_BYTES );
-			$entry    = array(
+			$transfer      = self::to_int( self::g( $resource, 'transfer' ), 0, self::MAX_BYTES );
+			$encoded       = self::to_int( self::g( $resource, 'encoded' ), 0, self::MAX_BYTES );
+			$entry         = array(
 				'url'       => $url,
 				'type'      => self::to_token( self::g( $resource, 'type' ), 20 ),
 				'transfer'  => $transfer,
@@ -888,11 +905,57 @@ class BLT_Optimized_Lab {
 	 *
 	 * @param mixed      $data    Array (anything else yields the default).
 	 * @param string|int $key     Key.
-	 * @param mixed      $default Default.
+	 * @param mixed      $fallback Default.
 	 * @return mixed
 	 */
-	private static function g( $data, $key, $default = null ) {
-		return ( is_array( $data ) && isset( $data[ $key ] ) ) ? $data[ $key ] : $default;
+	private static function g( $data, $key, $fallback = null ) {
+		return ( is_array( $data ) && isset( $data[ $key ] ) ) ? $data[ $key ] : $fallback;
+	}
+
+	/**
+	 * Null-safe string read: a string or number comes back as a string, anything
+	 * else (missing, null, array, object) as the default.
+	 *
+	 * @param mixed      $data    Array.
+	 * @param string|int $key     Key.
+	 * @param string     $fallback Default.
+	 * @return string
+	 */
+	private static function s( $data, $key, $fallback = '' ) {
+		$value = ( is_array( $data ) && isset( $data[ $key ] ) ) ? $data[ $key ] : null;
+		return ( is_string( $value ) || is_int( $value ) || is_float( $value ) ) ? (string) $value : (string) $fallback;
+	}
+
+	/**
+	 * Null-safe number read: a finite number (or numeric string) comes back as a
+	 * float, anything else as the default.
+	 *
+	 * @param mixed      $data    Array.
+	 * @param string|int $key     Key.
+	 * @param int|float  $fallback Default.
+	 * @return float
+	 */
+	private static function n( $data, $key, $fallback = 0 ) {
+		$value = ( is_array( $data ) && isset( $data[ $key ] ) ) ? $data[ $key ] : null;
+		if ( is_int( $value ) || is_float( $value ) || ( is_string( $value ) && is_numeric( $value ) ) ) {
+			$value = (float) $value;
+			if ( is_finite( $value ) ) {
+				return $value;
+			}
+		}
+		return (float) $fallback;
+	}
+
+	/**
+	 * Null-safe whole-number read (finite, within the range of an int).
+	 *
+	 * @param mixed      $data    Array.
+	 * @param string|int $key     Key.
+	 * @param int|float  $fallback Default.
+	 * @return int
+	 */
+	private static function i( $data, $key, $fallback = 0 ) {
+		return (int) max( -2147483648, min( 2147483647, round( self::n( $data, $key, $fallback ) ) ) );
 	}
 
 	/**
@@ -914,16 +977,16 @@ class BLT_Optimized_Lab {
 	 * @param int|float      $min      Minimum (values below are raised).
 	 * @param int|float      $max      Maximum (values above are lowered).
 	 * @param int            $decimals Decimals kept.
-	 * @param int|float|null $default  Result for a non-number.
+	 * @param int|float|null $fallback  Result for a non-number.
 	 * @return float|int|null
 	 */
-	private static function to_num( $value, $min, $max, $decimals = 1, $default = null ) {
+	private static function to_num( $value, $min, $max, $decimals = 1, $fallback = null ) {
 		if ( ! is_int( $value ) && ! is_float( $value ) ) {
-			return $default;
+			return $fallback;
 		}
 		$value = (float) $value;
 		if ( is_nan( $value ) || is_infinite( $value ) ) {
-			return $default;
+			return $fallback;
 		}
 		return round( max( $min, min( $max, $value ) ), $decimals );
 	}
@@ -934,12 +997,12 @@ class BLT_Optimized_Lab {
 	 * @param mixed $value   Raw.
 	 * @param int   $min     Minimum.
 	 * @param int   $max     Maximum.
-	 * @param int   $default Result for a non-number.
+	 * @param int   $fallback Result for a non-number.
 	 * @return int
 	 */
-	private static function to_int( $value, $min, $max, $default = 0 ) {
+	private static function to_int( $value, $min, $max, $fallback = 0 ) {
 		$number = self::to_num( $value, $min, $max, 0, null );
-		return null === $number ? (int) $default : (int) $number;
+		return null === $number ? (int) $fallback : (int) $number;
 	}
 
 	/**
@@ -1184,7 +1247,7 @@ class BLT_Optimized_Lab {
 		// WordPress core's own inline styles.
 		foreach ( array( 'global-styles', 'classic-theme-styles', 'wp-block', 'wp-img-auto-sizes', 'core-block', 'admin-bar', 'dashicons', 'wp-emoji' ) as $core ) {
 			if ( 0 === strpos( $stem, $core ) ) {
-				return BLT_Optimized_Components::make( 'core', 'wordpress', __( 'WordPress core', 'blt-optimized' ) );
+				return BLT_Optimized_Components::make( 'core', 'WordPress', __( 'WordPress core', 'blt-optimized' ) );
 			}
 		}
 
@@ -1209,8 +1272,8 @@ class BLT_Optimized_Lab {
 		}
 
 		$aliases = array(
-			'wc-'    => 'woocommerce',
-			'wpcf7'  => 'contact-form-7',
+			'wc-'   => 'woocommerce',
+			'wpcf7' => 'contact-form-7',
 		);
 		foreach ( $aliases as $prefix => $slug ) {
 			if ( 0 === strpos( $stem, $prefix ) && in_array( $slug, self::$memo['slugs'], true ) ) {
@@ -1229,7 +1292,7 @@ class BLT_Optimized_Lab {
 			}
 		}
 		if ( 0 === strpos( $stem, 'wp-' ) ) {
-			return BLT_Optimized_Components::make( 'core', 'wordpress', __( 'WordPress core', 'blt-optimized' ) );
+			return BLT_Optimized_Components::make( 'core', 'WordPress', __( 'WordPress core', 'blt-optimized' ) );
 		}
 		return $unknown;
 	}
@@ -1257,7 +1320,7 @@ class BLT_Optimized_Lab {
 		} catch ( \Throwable $e ) {
 			$located = null;
 		}
-		$located                            = self::clean_bricks( $located, 0 );
+		$located                             = self::clean_bricks( $located, 0 );
 		self::$memo['bricks'][ $element_id ] = $located ? $located : null;
 		return self::$memo['bricks'][ $element_id ];
 	}
@@ -1281,7 +1344,7 @@ class BLT_Optimized_Lab {
 			}
 			if ( is_string( $item ) ) {
 				if ( false !== strpos( $key, 'url' ) || false !== strpos( $key, 'link' ) ) {
-					$item = esc_url_raw( $item, array( 'http', 'https' ) );
+					$item        = esc_url_raw( $item, array( 'http', 'https' ) );
 					$out[ $key ] = self::to_str( $item, 500 );
 				} else {
 					$out[ $key ] = self::to_str( $item, 200, true );
@@ -1303,12 +1366,12 @@ class BLT_Optimized_Lab {
 	/**
 	 * Resource kind: js|css|img|font|other.
 	 *
-	 * @param array $resource Resource { url, type }.
+	 * @param array $entry Resource { url, type }.
 	 * @return string
 	 */
-	private static function kind_of( array $resource ) {
-		$url  = (string) self::g( $resource, 'url', '' );
-		$type = (string) self::g( $resource, 'type', '' );
+	private static function kind_of( array $entry ) {
+		$url  = self::s( $entry, 'url', '' );
+		$type = self::s( $entry, 'type', '' );
 
 		$ext = '';
 		if ( preg_match( '#\.([a-z0-9]{2,5})(?:[?\#]|$)#i', $url, $m ) ) {
@@ -1343,15 +1406,15 @@ class BLT_Optimized_Lab {
 	 * Bytes a resource weighs: what crossed the network, or its encoded size
 	 * when it came from the cache (so the weight is the same on every run).
 	 *
-	 * @param array $resource Resource.
+	 * @param array $entry Resource.
 	 * @return int
 	 */
-	private static function resource_size( array $resource ) {
-		if ( isset( $resource['size'] ) && is_numeric( $resource['size'] ) ) {
-			return max( 0, (int) $resource['size'] );
+	private static function resource_size( array $entry ) {
+		if ( isset( $entry['size'] ) && is_numeric( $entry['size'] ) ) {
+			return max( 0, self::i( $entry, 'size' ) );
 		}
-		$transfer = (int) self::g( $resource, 'transfer', 0 );
-		return $transfer > 0 ? $transfer : max( 0, (int) self::g( $resource, 'encoded', 0 ) );
+		$transfer = self::i( $entry, 'transfer' );
+		return $transfer > 0 ? $transfer : max( 0, self::i( $entry, 'encoded' ) );
 	}
 
 	/**
@@ -1363,7 +1426,7 @@ class BLT_Optimized_Lab {
 	 * @return float|int|null
 	 */
 	private static function metric( $value, $zero_valid = false ) {
-		if ( ! is_int( $value ) && ! is_float( $value ) ) {
+		if ( ( ! is_int( $value ) && ! is_float( $value ) ) || is_nan( (float) $value ) || is_infinite( (float) $value ) ) {
 			return null;
 		}
 		if ( ! $zero_valid && $value <= 0 ) {
@@ -1510,15 +1573,15 @@ class BLT_Optimized_Lab {
 			$static_over = array();
 			$html        = self::g( $page, 'html' );
 			foreach ( (array) self::g( $html, 'images', array() ) as $img ) {
-				if ( ! is_array( $img ) || empty( $img['src'] ) || ! is_string( $img['src'] ) ) {
+				if ( ! is_array( $img ) || '' === self::s( $img, 'src' ) ) {
 					continue;
 				}
-				$key = self::image_key( $img['src'] );
+				$key = self::image_key( self::s( $img, 'src' ) );
 				if ( $post && ! empty( $img['in_content'] ) ) {
 					$in_content[ $key ] = true;
 				}
-				$attr_w    = (int) self::g( $img, 'attr_w', 0 );
-				$natural_w = (int) self::g( $img, 'natural_w', 0 );
+				$attr_w    = self::i( $img, 'attr_w', 0 );
+				$natural_w = self::i( $img, 'natural_w', 0 );
 				if ( $attr_w > 0 && $natural_w > 2 * $attr_w && empty( $img['has_srcset'] ) ) {
 					$static_over[ $key ] = true;
 				}
@@ -1600,7 +1663,7 @@ class BLT_Optimized_Lab {
 	 */
 	private static function page_name( array $page, $ref ) {
 		$post  = self::g( $page, 'post' );
-		$title = is_array( $post ) ? trim( wp_strip_all_tags( (string) self::g( $post, 'title', '' ) ) ) : '';
+		$title = is_array( $post ) ? trim( wp_strip_all_tags( self::s( $post, 'title', '' ) ) ) : '';
 		if ( '' !== $title ) {
 			/* translators: %s: post title. */
 			return sprintf( __( '“%s”', 'blt-optimized' ), self::trunc( $title, 50 ) );
@@ -1608,7 +1671,7 @@ class BLT_Optimized_Lab {
 		if ( '/' === $ref ) {
 			return __( 'the home page', 'blt-optimized' );
 		}
-		$label = trim( (string) self::g( $page, 'label', '' ) );
+		$label = trim( self::s( $page, 'label', '' ) );
 		if ( '' !== $label && '/' !== $label[0] ) {
 			return self::trunc( $label, 50 );
 		}
@@ -1766,10 +1829,11 @@ class BLT_Optimized_Lab {
 	 * @return string
 	 */
 	private static function file_name( $url ) {
-		$path = (string) wp_parse_url( (string) $url, PHP_URL_PATH );
+		$url  = is_string( $url ) ? $url : '';
+		$path = (string) wp_parse_url( $url, PHP_URL_PATH );
 		$name = rawurldecode( basename( $path ) );
 		if ( '' === $name || '/' === $name ) {
-			$name = (string) wp_parse_url( (string) $url, PHP_URL_HOST );
+			$name = (string) wp_parse_url( $url, PHP_URL_HOST );
 		}
 		return self::trunc( $name, 60 );
 	}
@@ -1782,7 +1846,7 @@ class BLT_Optimized_Lab {
 	 * @return string
 	 */
 	private static function image_key( $url ) {
-		$path = strtolower( rawurldecode( (string) wp_parse_url( (string) $url, PHP_URL_PATH ) ) );
+		$path = strtolower( rawurldecode( (string) wp_parse_url( is_string( $url ) ? $url : '', PHP_URL_PATH ) ) );
 		$path = (string) preg_replace( '/-(?:\d+x\d+|scaled|rotated)(?=\.[a-z0-9]+$)/', '', $path );
 		return $path;
 	}
@@ -2037,8 +2101,8 @@ class BLT_Optimized_Lab {
 			$assets  = self::g( $profile, 'assets' );
 			foreach ( array( 'scripts', 'styles' ) as $kind ) {
 				foreach ( (array) self::g( $assets, $kind, array() ) as $asset ) {
-					if ( is_array( $asset ) && ! empty( $asset['src'] ) && ! empty( $asset['handle'] ) && is_string( $asset['src'] ) ) {
-						$map[ self::path_key( $asset['src'] ) ] = (string) $asset['handle'];
+					if ( is_array( $asset ) && '' !== self::s( $asset, 'src' ) && '' !== self::s( $asset, 'handle' ) ) {
+						$map[ self::path_key( $asset['src'] ) ] = self::s( $asset, 'handle' );
 					}
 				}
 			}
@@ -2055,7 +2119,7 @@ class BLT_Optimized_Lab {
 	 * @return string
 	 */
 	private static function path_key( $url ) {
-		return strtolower( (string) wp_parse_url( (string) $url, PHP_URL_PATH ) );
+		return strtolower( (string) wp_parse_url( is_string( $url ) ? $url : '', PHP_URL_PATH ) );
 	}
 
 	/**
@@ -2066,7 +2130,7 @@ class BLT_Optimized_Lab {
 	 * @return float
 	 */
 	private static function effective_dpr( array $run ) {
-		$dpr = (float) self::g( self::g( $run['lab'], 'viewport' ), 'dpr', 1 );
+		$dpr = self::n( self::g( $run['lab'], 'viewport' ), 'dpr', 1 );
 		$dpr = max( 1.0, $dpr );
 		return 'mobile' === $run['vp'] ? max( $dpr, (float) self::t( 'OVERSIZED_MIN_DPR' ) ) : $dpr;
 	}
@@ -2080,8 +2144,8 @@ class BLT_Optimized_Lab {
 	private static function sizes_of( array $run ) {
 		$sizes = array();
 		foreach ( (array) self::g( $run['lab'], 'resources', array() ) as $resource ) {
-			if ( is_array( $resource ) && ! empty( $resource['url'] ) ) {
-				$sizes[ $resource['url'] ] = self::resource_size( $resource );
+			if ( is_array( $resource ) && '' !== self::s( $resource, 'url' ) ) {
+				$sizes[ self::s( $resource, 'url' ) ] = self::resource_size( $resource );
 			}
 		}
 		return $sizes;
@@ -2106,16 +2170,17 @@ class BLT_Optimized_Lab {
 	 * @return array
 	 */
 	private static function comp( $component, $url = '' ) {
-		if ( ! is_array( $component ) || ( empty( $component['slug'] ) && empty( $component['name'] ) ) ) {
+		if ( ! is_array( $component ) || ( '' === self::s( $component, 'slug' ) && '' === self::s( $component, 'name' ) ) ) {
 			if ( '' !== $url ) {
 				return BLT_Optimized_Components::from_url( $url );
 			}
 			return BLT_Optimized_Components::make( 'other', 'unknown', __( 'Unknown', 'blt-optimized' ) );
 		}
+		$name = self::s( $component, 'name' );
 		return BLT_Optimized_Components::make(
-			isset( $component['type'] ) ? $component['type'] : 'other',
-			isset( $component['slug'] ) ? $component['slug'] : '',
-			isset( $component['name'] ) && '' !== $component['name'] ? $component['name'] : ( isset( $component['slug'] ) ? $component['slug'] : '' )
+			self::s( $component, 'type', 'other' ),
+			self::s( $component, 'slug' ),
+			'' !== $name ? $name : self::s( $component, 'slug' )
 		);
 	}
 
@@ -2133,7 +2198,8 @@ class BLT_Optimized_Lab {
 				return $known;
 			}
 		}
-		return '' !== (string) self::g( $component, 'name', '' ) ? (string) $component['name'] : (string) self::g( $component, 'slug', '?' );
+		$name = self::s( $component, 'name' );
+		return '' !== $name ? $name : self::s( $component, 'slug', '?' );
 	}
 
 	/**
@@ -2213,7 +2279,7 @@ class BLT_Optimized_Lab {
 			if ( ! is_array( $lcp ) || ! in_array( $run['sum']['ratings']['lcp'], array( 'needs-improvement', 'poor' ), true ) ) {
 				continue;
 			}
-			$analyses[ $ri ]                                  = self::lcp_analysis( $run );
+			$analyses[ $ri ]                                     = self::lcp_analysis( $run );
 			$groups[ self::lcp_key( $lcp, $analyses[ $ri ] ) ][] = $ri;
 		}
 
@@ -2241,18 +2307,18 @@ class BLT_Optimized_Lab {
 	 * @return string
 	 */
 	private static function lcp_key( array $lcp, array $analysis ) {
-		if ( ! empty( $lcp['bricksId'] ) ) {
-			return 'bricks:' . $lcp['bricksId'];
+		if ( '' !== self::s( $lcp, 'bricksId' ) ) {
+			return 'bricks:' . self::s( $lcp, 'bricksId' );
 		}
-		if ( ! empty( $lcp['url'] ) ) {
-			return 'img:' . self::image_key( $lcp['url'] );
+		if ( '' !== self::s( $lcp, 'url' ) ) {
+			return 'img:' . self::image_key( self::s( $lcp, 'url' ) );
 		}
 		foreach ( array( 'blocking', 'ttfb', 'font', 'render_delay' ) as $cause ) {
 			if ( isset( $analysis['causes'][ $cause ] ) ) {
 				return 'text:' . $cause;
 			}
 		}
-		return 'el:' . ( ! empty( $lcp['selector'] ) ? $lcp['selector'] : 'lcp' );
+		return 'el:' . ( '' !== self::s( $lcp, 'selector' ) ? self::s( $lcp, 'selector' ) : 'lcp' );
 	}
 
 	/**
@@ -2263,27 +2329,27 @@ class BLT_Optimized_Lab {
 	 */
 	private static function lcp_subject( array $lcp ) {
 		$bricks = self::bricks_info( self::g( $lcp, 'bricks' ) );
-		$id     = (string) self::g( $lcp, 'bricksId', '' );
+		$id     = self::s( $lcp, 'bricksId', '' );
 		if ( $bricks ) {
 			return self::bricks_subject( $bricks, $id );
 		}
 
-		$tag = (string) self::g( $lcp, 'tag', '' );
-		if ( '' !== (string) self::g( $lcp, 'url', '' ) ) {
-			$file = self::file_name( $lcp['url'] );
+		$tag = self::s( $lcp, 'tag', '' );
+		if ( '' !== self::s( $lcp, 'url', '' ) ) {
+			$file = self::file_name( self::s( $lcp, 'url' ) );
 			/* translators: %s: image file name. */
 			$text = ! empty( $lcp['isBackground'] ) ? sprintf( __( 'the background image “%s”', 'blt-optimized' ), $file ) : sprintf( __( 'the image “%s”', 'blt-optimized' ), $file );
 		} else {
-			$snippet = self::trunc( (string) self::g( $lcp, 'text', '' ), 50 );
+			$snippet = self::trunc( self::s( $lcp, 'text', '' ), 50 );
 			if ( preg_match( '/^h[1-6]$/', $tag ) && '' !== $snippet ) {
 				/* translators: %s: heading text. */
 				$text = sprintf( __( 'the heading “%s”', 'blt-optimized' ), $snippet );
 			} elseif ( '' !== $snippet ) {
 				/* translators: %s: text of the element. */
 				$text = sprintf( __( 'the text “%s”', 'blt-optimized' ), $snippet );
-			} elseif ( '' !== (string) self::g( $lcp, 'selector', '' ) ) {
+			} elseif ( '' !== self::s( $lcp, 'selector', '' ) ) {
 				/* translators: %s: CSS selector. */
-				$text = sprintf( __( 'the element %s', 'blt-optimized' ), $lcp['selector'] );
+				$text = sprintf( __( 'the element %s', 'blt-optimized' ), self::s( $lcp, 'selector' ) );
 			} else {
 				$text = __( 'the largest element', 'blt-optimized' );
 			}
@@ -2306,15 +2372,15 @@ class BLT_Optimized_Lab {
 		$lab    = $run['lab'];
 		$lcp    = $lab['lcp'];
 		$nav    = self::g( $lab, 'nav' );
-		$time   = (float) self::g( $lcp, 'time', 0 );
-		$ttfb   = min( $time, max( 0.0, (float) self::g( $nav, 'ttfb', 0 ) ) );
-		$is_img = ! empty( $lcp['isImage'] ) && '' !== (string) self::g( $lcp, 'url', '' );
-		$url    = (string) self::g( $lcp, 'url', '' );
+		$time   = self::n( $lcp, 'time', 0 );
+		$ttfb   = min( $time, max( 0.0, self::n( $nav, 'ttfb', 0 ) ) );
+		$is_img = ! empty( $lcp['isImage'] ) && '' !== self::s( $lcp, 'url', '' );
+		$url    = self::s( $lcp, 'url', '' );
 
 		$res = self::g( $lcp, 'resource' );
 		if ( $is_img && ! is_array( $res ) ) {
 			foreach ( (array) self::g( $lab, 'resources', array() ) as $resource ) {
-				if ( is_array( $resource ) && isset( $resource['url'] ) && $resource['url'] === $url ) {
+				if ( is_array( $resource ) && self::s( $resource, 'url' ) === $url ) {
 					$res = $resource;
 					break;
 				}
@@ -2341,20 +2407,20 @@ class BLT_Optimized_Lab {
 			$sizes = self::sizes_of( $run );
 			$bytes = isset( $sizes[ $url ] ) ? (int) $sizes[ $url ] : 0;
 			foreach ( (array) self::g( $lab, 'resources', array() ) as $resource ) {
-				if ( is_array( $resource ) && isset( $resource['url'] ) && $resource['url'] === $url ) {
+				if ( is_array( $resource ) && self::s( $resource, 'url' ) === $url ) {
 					$cached = ! empty( $resource['cached'] );
 					break;
 				}
 			}
 		}
 
-		$blocking = (int) self::g( $res, 'renderBlockingBefore', 0 );
+		$blocking = self::i( $res, 'renderBlockingBefore', 0 );
 		$count    = 0;
 		$last_end = 0.0;
 		foreach ( (array) self::g( $lab, 'resources', array() ) as $resource ) {
 			if ( is_array( $resource ) && ! empty( $resource['blocking'] ) ) {
 				++$count;
-				$last_end = max( $last_end, (float) self::g( $resource, 'end', 0 ) );
+				$last_end = max( $last_end, self::n( $resource, 'end', 0 ) );
 			}
 		}
 		$blocking = max( $blocking, $count );
@@ -2389,8 +2455,8 @@ class BLT_Optimized_Lab {
 			);
 		}
 		if ( $is_img ) {
-			$natural  = (int) self::g( $lcp, 'naturalW', 0 );
-			$rendered = (float) self::g( $lcp, 'renderedW', 0 );
+			$natural  = self::i( $lcp, 'naturalW', 0 );
+			$rendered = self::n( $lcp, 'renderedW', 0 );
 			$dpr      = self::effective_dpr( $run );
 			$need     = $rendered * $dpr;
 			if ( $natural > 0 && $need > 0 && $natural > (float) self::t( 'LCP_OVERSIZED_RATIO' ) * $need ) {
@@ -2441,11 +2507,11 @@ class BLT_Optimized_Lab {
 				'step' => __( 'Remove or defer the render-blocking scripts and stylesheets listed under "render-blocking" findings; nothing can paint, including the LCP element, until they finish.', 'blt-optimized' ),
 			);
 		} elseif ( $phases['render'] >= (float) self::t( 'LCP_RENDER_DELAY_MS' ) ) {
-			$tbt                  = (float) self::g( self::g( $lab, 'tbt' ), 'value', 0 );
+			$tbt                    = self::n( self::g( $lab, 'tbt' ), 'value', 0 );
 			$causes['render_delay'] = array(
 				'text' => sprintf(
 					/* translators: %s: milliseconds. */
-					__( 'The element waited another %s to be painted after its data was ready%s.', 'blt-optimized' ),
+					__( 'The element waited another %1$s to be painted after its data was ready%2$s.', 'blt-optimized' ),
 					self::fmt_ms( $phases['render'] ),
 					$tbt > 0 ? __( ' (the main thread was busy running JavaScript)', 'blt-optimized' ) : ''
 				),
@@ -2464,7 +2530,7 @@ class BLT_Optimized_Lab {
 		}
 		if ( ! $is_img ) {
 			foreach ( (array) self::g( $lab, 'fonts', array() ) as $font ) {
-				if ( is_array( $font ) && in_array( (string) self::g( $font, 'display', '' ), array( '', 'auto', 'block' ), true ) ) {
+				if ( is_array( $font ) && in_array( self::s( $font, 'display', '' ), array( '', 'auto', 'block' ), true ) ) {
 					$causes['font'] = array(
 						'text' => __( 'The text can stay invisible until a web font has loaded (the font has no font-display: swap).', 'blt-optimized' ),
 						'step' => __( 'Use font-display: swap (or optional) for web fonts and preload the main font file so the LCP text is visible immediately.', 'blt-optimized' ),
@@ -2586,9 +2652,16 @@ class BLT_Optimized_Lab {
 			$steps[] = __( 'Keep the LCP element simple and early in the HTML; avoid hiding it behind animations, sliders or JavaScript-rendered content.', 'blt-optimized' );
 		}
 
-		$same_page = 1 === count( array_unique( array_map( static function ( $ri ) use ( $runs ) {
-			return $runs[ $ri ]['p'];
-		}, $ris ) ) );
+		$same_page = 1 === count(
+			array_unique(
+				array_map(
+					static function ( $ri ) use ( $runs ) {
+						return $runs[ $ri ]['p'];
+					},
+					$ris
+				)
+			)
+		);
 		$post      = $same_page ? $lead['post'] : null;
 
 		$title = sprintf(
@@ -2606,7 +2679,7 @@ class BLT_Optimized_Lab {
 				'text:font'         => __( 'waits for a web font', 'blt-optimized' ),
 				'text:render_delay' => __( 'waits on the main thread to paint', 'blt-optimized' ),
 			);
-			$title = sprintf(
+			$title   = sprintf(
 				/* translators: 1: time, 2: page names, 3: " (mobile)", 4: reason, e.g. "is held back by render-blocking files". */
 				__( 'Largest Contentful Paint takes %1$s on %2$s%3$s: the main content %4$s', 'blt-optimized' ),
 				self::fmt_ms( $worst ),
@@ -2617,8 +2690,8 @@ class BLT_Optimized_Lab {
 		}
 
 		$where = self::urls_of( $runs, $ris );
-		if ( ! empty( $lcp['url'] ) ) {
-			$where[] = (string) $lcp['url'];
+		if ( '' !== self::s( $lcp, 'url' ) ) {
+			$where[] = self::s( $lcp, 'url' );
 		}
 
 		return self::finding(
@@ -2686,7 +2759,7 @@ class BLT_Optimized_Lab {
 		$findings = array();
 		$limit    = (int) self::t( 'CLS_MAX_FINDINGS' );
 		foreach ( $culprits as $ekey => $culprit ) {
-			if ( count( $findings ) >= $limit || ( $findings && $culprit['max'] < (float) self::t( 'CLS_MIN_SHARE' ) ) ) {
+			if ( $limit <= count( $findings ) || ( $findings && (float) self::t( 'CLS_MIN_SHARE' ) > $culprit['max'] ) ) {
 				break;
 			}
 			$findings[] = self::cls_finding( $runs, $ekey, $culprit, 0 === count( $findings ) );
@@ -2713,7 +2786,7 @@ class BLT_Optimized_Lab {
 			if ( ! is_array( $shift ) ) {
 				continue;
 			}
-			$value = (float) self::g( $shift, 'value', 0 );
+			$value = self::n( $shift, 'value', 0 );
 			if ( $value <= 0 ) {
 				continue;
 			}
@@ -2749,8 +2822,8 @@ class BLT_Optimized_Lab {
 
 			$victims = array();
 			foreach ( $sources as $i => $source ) {
-				if ( ! isset( $weights[ $i ] ) && ! empty( $source['selector'] ) ) {
-					$victims[] = (string) $source['selector'];
+				if ( ! isset( $weights[ $i ] ) && '' !== self::s( $source, 'selector' ) ) {
+					$victims[] = self::s( $source, 'selector' );
 				}
 			}
 
@@ -2765,7 +2838,7 @@ class BLT_Optimized_Lab {
 					$acc[ $ekey ] = array(
 						'value'   => 0.0,
 						'count'   => 0,
-						'time'    => (float) self::g( $shift, 'time', 0 ),
+						'time'    => self::n( $shift, 'time', 0 ),
 						'best'    => 0.0,
 						'dy'      => 0.0,
 						'role'    => $growers ? 'size' : 'moved',
@@ -2784,14 +2857,14 @@ class BLT_Optimized_Lab {
 				}
 				if ( $part > $acc[ $ekey ]['best'] ) {
 					$acc[ $ekey ]['best']   = $part;
-					$acc[ $ekey ]['time']   = (float) self::g( $shift, 'time', 0 );
+					$acc[ $ekey ]['time']   = self::n( $shift, 'time', 0 );
 					$acc[ $ekey ]['source'] = $source;
 				}
 				$sum += $part;
 			}
 		}
 		if ( $sum > 0 ) {
-			$scale = (float) self::g( $cls, 'value', 0 ) / $sum;
+			$scale = self::n( $cls, 'value', 0 ) / $sum;
 			foreach ( $acc as $ekey => $row ) {
 				$acc[ $ekey ]['value'] = $row['value'] * $scale;
 			}
@@ -2843,14 +2916,14 @@ class BLT_Optimized_Lab {
 	 * @return string
 	 */
 	private static function element_key( array $source ) {
-		if ( ! empty( $source['bricksId'] ) ) {
-			return 'bricks:' . $source['bricksId'];
+		if ( '' !== self::s( $source, 'bricksId' ) ) {
+			return 'bricks:' . self::s( $source, 'bricksId' );
 		}
-		if ( ! empty( $source['selector'] ) ) {
-			return 'el:' . $source['selector'];
+		if ( '' !== self::s( $source, 'selector' ) ) {
+			return 'el:' . self::s( $source, 'selector' );
 		}
-		if ( ! empty( $source['tag'] ) ) {
-			return 'tag:' . $source['tag'];
+		if ( '' !== self::s( $source, 'tag' ) ) {
+			return 'tag:' . self::s( $source, 'tag' );
 		}
 		return 'unknown';
 	}
@@ -2865,11 +2938,11 @@ class BLT_Optimized_Lab {
 	private static function shift_subject( array $run, array $source ) {
 		$bricks = self::bricks_info( self::g( $source, 'bricks' ) );
 		if ( $bricks ) {
-			return self::bricks_subject( $bricks, (string) self::g( $source, 'bricksId', '' ) );
+			return self::bricks_subject( $bricks, self::s( $source, 'bricksId', '' ) );
 		}
 
-		$selector = (string) self::g( $source, 'selector', '' );
-		$tag      = (string) self::g( $source, 'tag', '' );
+		$selector = self::s( $source, 'selector', '' );
+		$tag      = self::s( $source, 'tag', '' );
 		if ( 'img' === $tag ) {
 			foreach ( (array) self::g( $run['lab'], 'images', array() ) as $image ) {
 				if ( is_array( $image ) && '' !== $selector && self::g( $image, 'selector' ) === $selector && ! empty( $image['src'] ) ) {
@@ -2900,7 +2973,7 @@ class BLT_Optimized_Lab {
 	 */
 	private static function cls_causes( array $run, array $share ) {
 		$source = $share['source'];
-		$tag    = (string) self::g( $source, 'tag', '' );
+		$tag    = self::s( $source, 'tag', '' );
 		$time   = (float) $share['time'];
 		$prev   = self::g( $source, 'prevRect' );
 		$curr   = self::g( $source, 'currRect' );
@@ -2952,7 +3025,7 @@ class BLT_Optimized_Lab {
 		if ( 'img' !== $tag && ! in_array( $tag, array( 'iframe', 'video', 'embed', 'object' ), true ) ) {
 			$window = (float) self::t( 'CLS_FONT_WINDOW_MS' );
 			foreach ( (array) self::g( $run['lab'], 'resources', array() ) as $resource ) {
-				if ( is_array( $resource ) && 'font' === self::g( $resource, 'kind' ) && abs( (float) self::g( $resource, 'end', 0 ) - $time ) <= $window ) {
+				if ( is_array( $resource ) && 'font' === self::g( $resource, 'kind' ) && abs( self::n( $resource, 'end', 0 ) - $time ) <= $window ) {
 					$causes['font'] = array(
 						'text' => __( 'The shift happened right when a web font finished loading: the text was re-laid out with different letter widths.', 'blt-optimized' ),
 						'step' => __( 'Preload the main web font and use font-display: optional (or swap with a size-adjusted fallback font) so the text does not change size when the font arrives.', 'blt-optimized' ),
@@ -2962,7 +3035,7 @@ class BLT_Optimized_Lab {
 			}
 		}
 
-		$load = (float) self::g( self::g( $run['lab'], 'nav' ), 'load', 0 );
+		$load = self::n( self::g( $run['lab'], 'nav' ), 'load', 0 );
 		if ( $load > 0 && $time > $load + (float) self::t( 'CLS_LATE_AFTER_MS' ) ) {
 			$causes['late'] = array(
 				'text' => sprintf(
@@ -3066,9 +3139,16 @@ class BLT_Optimized_Lab {
 			$steps[] = $cause['step'];
 		}
 
-		$same_page = 1 === count( array_unique( array_map( static function ( $ri ) use ( $runs ) {
-			return $runs[ $ri ]['p'];
-		}, $ris ) ) );
+		$same_page = 1 === count(
+			array_unique(
+				array_map(
+					static function ( $ri ) use ( $runs ) {
+						return $runs[ $ri ]['p'];
+					},
+					$ris
+				)
+			)
+		);
 
 		$title = sprintf(
 			$sizing
@@ -3134,14 +3214,14 @@ class BLT_Optimized_Lab {
 			$dpr   = self::effective_dpr( $run );
 
 			foreach ( (array) self::g( $run['lab'], 'images', array() ) as $img ) {
-				if ( ! is_array( $img ) || empty( $img['src'] ) || ! is_string( $img['src'] ) ) {
+				if ( ! is_array( $img ) || '' === self::s( $img, 'src' ) ) {
 					continue;
 				}
-				$src      = $img['src'];
+				$src      = self::s( $img, 'src' );
 				$bytes    = isset( $sizes[ $src ] ) ? (int) $sizes[ $src ] : 0;
-				$natural  = (int) self::g( $img, 'naturalW', 0 );
-				$rendered = (float) self::g( $img, 'renderedW', 0 );
-				$hidden   = $rendered <= 0 && (float) self::g( $img, 'renderedH', 0 ) <= 0;
+				$natural  = self::i( $img, 'naturalW', 0 );
+				$rendered = self::n( $img, 'renderedW', 0 );
+				$hidden   = $rendered <= 0 && self::n( $img, 'renderedH', 0 ) <= 0;
 
 				// Vector images have no meaningful pixel size; 1x1 images are trackers.
 				if ( $bytes <= 0 || $natural <= 2 || preg_match( '/\.svgz?(?:$|[?#])/i', $src ) ) {
@@ -3201,7 +3281,7 @@ class BLT_Optimized_Lab {
 	 * @return array { 0: group key, 1: group info }
 	 */
 	private static function image_group( array $run, array $img ) {
-		if ( $run['post'] && isset( $run['in_content'][ self::image_key( $img['src'] ) ] ) ) {
+		if ( $run['post'] && isset( $run['in_content'][ self::image_key( self::s( $img, 'src' ) ) ] ) ) {
 			return array(
 				'post:' . (int) $run['post']['id'],
 				array(
@@ -3222,7 +3302,7 @@ class BLT_Optimized_Lab {
 			);
 		}
 
-		$component = self::comp( self::g( $img, 'component' ), $img['src'] );
+		$component = self::comp( self::g( $img, 'component' ), self::s( $img, 'src' ) );
 		if ( self::is_actionable( $component ) ) {
 			return array(
 				'comp:' . BLT_Optimized_Components::key( $component ),
@@ -3295,11 +3375,11 @@ class BLT_Optimized_Lab {
 	 * @return string
 	 */
 	private static function post_label( $post ) {
-		$title = trim( wp_strip_all_tags( (string) self::g( $post, 'title', '' ) ) );
+		$title = trim( wp_strip_all_tags( self::s( $post, 'title', '' ) ) );
 		if ( '' === $title ) {
 			$title = __( '(no title)', 'blt-optimized' );
 		}
-		$type = (string) self::g( $post, 'type', 'post' );
+		$type = self::s( $post, 'type', 'post' );
 		$noun = ucfirst( $type );
 		$obj  = get_post_type_object( $type );
 		if ( $obj && ! empty( $obj->labels->singular_name ) ) {
@@ -3348,13 +3428,13 @@ class BLT_Optimized_Lab {
 			$gkey = $cand['gkey'];
 			if ( ! isset( $groups[ $gkey ] ) ) {
 				$groups[ $gkey ] = array(
-					'info'   => $cand['ginfo'],
-					'items'  => array(),
+					'info'    => $cand['ginfo'],
+					'items'   => array(),
 					'per_run' => array(),
-					'worst'  => 0,
+					'worst'   => 0,
 				);
 			}
-			$groups[ $gkey ]['items'][] = $cand;
+			$groups[ $gkey ]['items'][]                = $cand;
 			$groups[ $gkey ]['per_run'][ $cand['ri'] ] = ( isset( $groups[ $gkey ]['per_run'][ $cand['ri'] ] ) ? $groups[ $gkey ]['per_run'][ $cand['ri'] ] : 0 ) + $cand[ $metric ];
 		}
 		foreach ( $groups as $gkey => $group ) {
@@ -3373,10 +3453,10 @@ class BLT_Optimized_Lab {
 			}
 		);
 
-		$cap   = (int) self::t( 'MAX_IMAGE_FINDINGS' );
-		$head  = array_slice( $groups, 0, $cap, true );
-		$rest  = array_slice( $groups, $cap, null, true );
-		$out   = array();
+		$cap  = (int) self::t( 'MAX_IMAGE_FINDINGS' );
+		$head = array_slice( $groups, 0, $cap, true );
+		$rest = array_slice( $groups, $cap, null, true );
+		$out  = array();
 		foreach ( $head as $gkey => $group ) {
 			$out[] = self::image_group_finding( $runs, $gkey, $group, $mode );
 		}
@@ -3414,9 +3494,16 @@ class BLT_Optimized_Lab {
 		$who   = self::group_subject( $info );
 		$items = $group['items'];
 		$ris   = array_values( array_unique( wp_list_pluck( $items, 'ri' ) ) );
-		$count = count( array_unique( array_map( static function ( $item ) {
-			return self::image_key( $item['img']['src'] );
-		}, $items ) ) );
+		$count = count(
+			array_unique(
+				array_map(
+					static function ( $item ) {
+						return self::image_key( $item['img']['src'] );
+					},
+					$items
+				)
+			)
+		);
 
 		usort(
 			$items,
@@ -3439,9 +3526,9 @@ class BLT_Optimized_Lab {
 				$rows[] = array(
 					$run['ref'],
 					self::device( $run['vp'] ),
-					self::file_name( $img['src'] ),
-					number_format_i18n( $img['naturalW'] ) . ' × ' . number_format_i18n( $img['naturalH'] ) . ' px',
-					number_format_i18n( round( $img['renderedW'] ) ) . ' × ' . number_format_i18n( round( $img['renderedH'] ) ) . ' px',
+					self::file_name( self::s( $img, 'src' ) ),
+					number_format_i18n( self::i( $img, 'naturalW' ) ) . ' × ' . number_format_i18n( self::i( $img, 'naturalH' ) ) . ' px',
+					number_format_i18n( self::i( $img, 'renderedW' ) ) . ' × ' . number_format_i18n( self::i( $img, 'renderedH' ) ) . ' px',
 					self::fmt_bytes( $item['bytes'] ),
 					'~' . self::fmt_bytes( $item['wasted'] ),
 				);
@@ -3449,11 +3536,11 @@ class BLT_Optimized_Lab {
 				$rows[] = array(
 					$run['ref'],
 					self::device( $run['vp'] ),
-					self::file_name( $img['src'] ),
+					self::file_name( self::s( $img, 'src' ) ),
 					$item['hidden']
 						? __( 'hidden (slide, tab or collapsed block)', 'blt-optimized' )
 						/* translators: %s: distance from the top of the page in pixels. */
-						: sprintf( __( '%s px from the top', 'blt-optimized' ), number_format_i18n( round( (float) $img['top'] ) ) ),
+						: sprintf( __( '%s px from the top', 'blt-optimized' ), number_format_i18n( self::i( $img, 'top' ) ) ),
 					self::fmt_bytes( $item['bytes'] ),
 				);
 			}
@@ -3512,9 +3599,18 @@ class BLT_Optimized_Lab {
 		$fix    = self::located_fix( $bricks, $post, $steps );
 
 		$where = self::urls_of( $runs, $ris );
-		foreach ( array_slice( array_unique( array_map( static function ( $item ) {
-			return $item['img']['src'];
-		}, $items ) ), 0, 5 ) as $src ) {
+		foreach ( array_slice(
+			array_unique(
+				array_map(
+					static function ( $item ) {
+						return $item['img']['src'];
+					},
+					$items
+				)
+			),
+			0,
+			5
+		) as $src ) {
 			$where[] = $src;
 		}
 
@@ -3555,25 +3651,25 @@ class BLT_Optimized_Lab {
 	 * @return array[]
 	 */
 	private static function check_dom_size( array $runs ) {
-		$warn   = (int) self::t( 'DOM_WARN' );
-		$crit   = (int) self::t( 'DOM_CRIT' );
-		$growth = (float) self::t( 'DOM_JS_GROWTH' );
-		$rows   = array();
-		$ris    = array();
-		$worst  = 0;
+		$warn       = (int) self::t( 'DOM_WARN' );
+		$crit       = (int) self::t( 'DOM_CRIT' );
+		$growth     = (float) self::t( 'DOM_JS_GROWTH' );
+		$rows       = array();
+		$ris        = array();
+		$worst      = 0;
 		$worst_html = 0;
 		$deepest    = 0;
 
 		foreach ( $runs as $ri => $run ) {
-			$nodes = (int) self::g( self::g( $run['lab'], 'dom' ), 'nodes', 0 );
+			$nodes = self::i( self::g( $run['lab'], 'dom' ), 'nodes', 0 );
 			if ( $nodes < $warn ) {
 				continue;
 			}
-			$html = (int) self::g( self::g( $run['page'], 'html' ), 'dom_nodes', 0 );
+			$html = self::i( self::g( $run['page'], 'html' ), 'dom_nodes', 0 );
 			if ( $html >= $warn && $nodes < $html * $growth ) {
 				continue;
 			}
-			$depth = (int) self::g( self::g( $run['lab'], 'dom' ), 'depth', 0 );
+			$depth = self::i( self::g( $run['lab'], 'dom' ), 'depth', 0 );
 			$ris[] = $ri;
 			if ( $nodes > $worst ) {
 				$worst      = $nodes;
@@ -3716,8 +3812,8 @@ class BLT_Optimized_Lab {
 		// The three heaviest files of the heaviest run, by name.
 		$big = array();
 		foreach ( (array) self::g( $lead['lab'], 'resources', array() ) as $resource ) {
-			if ( is_array( $resource ) && ! empty( $resource['url'] ) ) {
-				$big[ $resource['url'] ] = self::resource_size( $resource );
+			if ( is_array( $resource ) && '' !== self::s( $resource, 'url' ) ) {
+				$big[ self::s( $resource, 'url' ) ] = self::resource_size( $resource );
 			}
 		}
 		arsort( $big );
@@ -3813,12 +3909,12 @@ class BLT_Optimized_Lab {
 	private static function check_render_blocking( array $runs ) {
 		$groups = array();
 		foreach ( $runs as $ri => $run ) {
-			$ttfb = (float) self::g( self::g( $run['lab'], 'nav' ), 'ttfb', 0 );
+			$ttfb = self::n( self::g( $run['lab'], 'nav' ), 'ttfb', 0 );
 			foreach ( (array) self::g( $run['lab'], 'resources', array() ) as $resource ) {
-				if ( ! is_array( $resource ) || empty( $resource['blocking'] ) || empty( $resource['url'] ) ) {
+				if ( ! is_array( $resource ) || empty( $resource['blocking'] ) || '' === self::s( $resource, 'url' ) ) {
 					continue;
 				}
-				$component = self::comp( self::g( $resource, 'component' ), $resource['url'] );
+				$component = self::comp( self::g( $resource, 'component' ), self::s( $resource, 'url' ) );
 				$ckey      = BLT_Optimized_Components::key( $component );
 				if ( ! isset( $groups[ $ckey ] ) ) {
 					$groups[ $ckey ] = array(
@@ -3834,9 +3930,9 @@ class BLT_Optimized_Lab {
 						'delay'    => 0.0,
 					);
 				}
-				$size = self::resource_size( $resource );
-				$end  = (float) self::g( $resource, 'end', 0 );
-				$entry = &$groups[ $ckey ]['runs'][ $ri ];
+				$size              = self::resource_size( $resource );
+				$end               = self::n( $resource, 'end', 0 );
+				$entry             = &$groups[ $ckey ]['runs'][ $ri ];
 				$entry['files'][]  = $resource;
 				$entry['bytes']   += $size;
 				$entry['last_end'] = max( $entry['last_end'], $end );
@@ -3889,18 +3985,18 @@ class BLT_Optimized_Lab {
 			$run   = $runs[ $ri ];
 			$shown = 0;
 			foreach ( $entry['files'] as $file ) {
-				$kind = (string) self::g( $file, 'kind', self::kind_of( $file ) );
+				$kind = self::s( $file, 'kind', self::kind_of( $file ) );
 				if ( 'js' === $kind ) {
-					if ( self::is_jquery( $file['url'] ) ) {
+					if ( self::is_jquery( self::s( $file, 'url' ) ) ) {
 						$has_jquery  = true;
-						$has_migrate = $has_migrate || false !== stripos( $file['url'], 'jquery-migrate' );
+						$has_migrate = $has_migrate || false !== stripos( self::s( $file, 'url' ), 'jquery-migrate' );
 					} else {
 						$has_js = true;
 					}
 				} else {
 					$has_css = true;
 				}
-				$handle = self::handle_for( $run, $file['url'] );
+				$handle = self::handle_for( $run, self::s( $file, 'url' ) );
 				if ( '' !== $handle ) {
 					$handles[ $handle ] = true;
 				}
@@ -3908,10 +4004,10 @@ class BLT_Optimized_Lab {
 					$rows[] = array(
 						$run['ref'],
 						self::device( $run['vp'] ),
-						self::file_name( $file['url'] ),
+						self::file_name( self::s( $file, 'url' ) ),
 						'js' === $kind ? __( 'script', 'blt-optimized' ) : __( 'stylesheet', 'blt-optimized' ),
 						self::resource_size( $file ) > 0 ? self::fmt_bytes( self::resource_size( $file ) ) : '–',
-						self::fmt_ms( (float) self::g( $file, 'end', 0 ) ),
+						self::fmt_ms( self::n( $file, 'end', 0 ) ),
 						$handle,
 					);
 				}
@@ -3936,7 +4032,7 @@ class BLT_Optimized_Lab {
 
 		$state = self::defer_state();
 		if ( $has_js && 'offer' === $state ) {
-			$fix = array(
+			$fix      = array(
 				'type'    => 'action',
 				'label'   => __( 'Defer scripts', 'blt-optimized' ),
 				'action'  => 'tweak',
@@ -4029,7 +4125,7 @@ class BLT_Optimized_Lab {
 	 * @return bool
 	 */
 	private static function is_jquery( $url ) {
-		return (bool) preg_match( '#/jquery(?:-migrate)?(?:\.min)?\.js#i', (string) $url );
+		return is_string( $url ) && (bool) preg_match( '#/jquery(?:-migrate)?(?:\.min)?\.js#i', $url );
 	}
 
 	/* ------------------------------------------------------------------ */
@@ -4046,10 +4142,10 @@ class BLT_Optimized_Lab {
 		$groups = array();
 		foreach ( $runs as $ri => $run ) {
 			foreach ( (array) self::g( $run['lab'], 'css', array() ) as $sheet ) {
-				if ( ! is_array( $sheet ) || empty( $sheet['accessible'] ) || (int) self::g( $sheet, 'bytes', 0 ) <= 0 ) {
+				if ( ! is_array( $sheet ) || empty( $sheet['accessible'] ) || self::i( $sheet, 'bytes', 0 ) <= 0 ) {
 					continue;
 				}
-				$href      = (string) self::g( $sheet, 'href', '' );
+				$href      = self::s( $sheet, 'href', '' );
 				$component = self::comp( self::g( $sheet, 'component' ), $href );
 				$ckey      = BLT_Optimized_Components::key( $component );
 				if ( ! isset( $groups[ $ckey ] ) ) {
@@ -4066,13 +4162,13 @@ class BLT_Optimized_Lab {
 						'sheets' => array(),
 					);
 				}
-				$bytes  = (int) $sheet['bytes'];
-				$unused = (int) self::g( $sheet, 'unusedBytes', 0 );
-				$groups[ $ckey ]['runs'][ $ri ]['bytes']    += $bytes;
-				$groups[ $ckey ]['runs'][ $ri ]['unused']   += $unused;
-				$groups[ $ckey ]['runs'][ $ri ]['sheets'][]  = $sheet;
+				$bytes                                      = (int) $sheet['bytes'];
+				$unused                                     = self::i( $sheet, 'unusedBytes', 0 );
+				$groups[ $ckey ]['runs'][ $ri ]['bytes']   += $bytes;
+				$groups[ $ckey ]['runs'][ $ri ]['unused']  += $unused;
+				$groups[ $ckey ]['runs'][ $ri ]['sheets'][] = $sheet;
 
-				$skey = '' !== $href ? self::path_key( $href ) : 'inline:' . (string) self::g( $sheet, 'inlineId', '' );
+				$skey = '' !== $href ? self::path_key( $href ) : 'inline:' . self::s( $sheet, 'inlineId', '' );
 				if ( ! isset( $groups[ $ckey ]['sheets'][ $skey ] ) ) {
 					$groups[ $ckey ]['sheets'][ $skey ] = array(
 						'name'  => '' !== $href ? self::file_name( $href ) : self::inline_name( $sheet ),
@@ -4117,7 +4213,7 @@ class BLT_Optimized_Lab {
 	 * @return string
 	 */
 	private static function inline_name( array $sheet ) {
-		$id = (string) self::g( $sheet, 'inlineId', '' );
+		$id = self::s( $sheet, 'inlineId', '' );
 		/* translators: %s: id of the <style> element. */
 		return '' !== $id ? sprintf( __( 'inline style #%s', 'blt-optimized' ), $id ) : __( 'inline style', 'blt-optimized' );
 	}
@@ -4149,13 +4245,13 @@ class BLT_Optimized_Lab {
 			usort(
 				$sheets,
 				static function ( $a, $b ) {
-					return (int) self::g( $b, 'unusedBytes', 0 ) <=> (int) self::g( $a, 'unusedBytes', 0 );
+					return self::i( $b, 'unusedBytes', 0 ) <=> self::i( $a, 'unusedBytes', 0 );
 				}
 			);
 			foreach ( array_slice( $sheets, 0, self::MAX_ROWS_PER_RUN ) as $sheet ) {
-				$href   = (string) self::g( $sheet, 'href', '' );
-				$bytes  = (int) self::g( $sheet, 'bytes', 0 );
-				$un     = (int) self::g( $sheet, 'unusedBytes', 0 );
+				$href   = self::s( $sheet, 'href', '' );
+				$bytes  = self::i( $sheet, 'bytes', 0 );
+				$un     = self::i( $sheet, 'unusedBytes', 0 );
 				$handle = '' !== $href ? self::handle_for( $run, $href ) : '';
 				if ( '' !== $handle && $un >= 4 * KB_IN_BYTES ) {
 					$handles[ $handle ] = true;
@@ -4172,7 +4268,7 @@ class BLT_Optimized_Lab {
 			}
 			if ( $ri === $worst ) {
 				foreach ( $run_entry['sheets'] as $sheet ) {
-					$other += (int) self::g( $sheet, 'otherMediaRules', 0 );
+					$other += self::i( $sheet, 'otherMediaRules', 0 );
 				}
 			}
 		}
@@ -4210,7 +4306,7 @@ class BLT_Optimized_Lab {
 			$summary .= ' ' . sprintf( __( '%s rules apply only to other screen sizes and are not counted as unused.', 'blt-optimized' ), number_format_i18n( $other ) );
 		}
 
-		$steps = array();
+		$steps       = array();
 		$inline_core = 'core' === $component['type'];
 		if ( 'external' === $component['type'] ) {
 			$steps[] = __( 'Load a smaller or custom build of this stylesheet, or self-host only the parts you use.', 'blt-optimized' );
@@ -4265,22 +4361,22 @@ class BLT_Optimized_Lab {
 				if ( ! is_array( $script ) ) {
 					continue;
 				}
-				$duration = (float) self::g( $script, 'duration', 0 );
+				$duration = self::n( $script, 'duration', 0 );
 				if ( $duration <= 0 ) {
 					continue;
 				}
-				$url       = (string) self::g( $script, 'url', '' );
+				$url       = self::s( $script, 'url', '' );
 				$component = ( '' === $url && empty( $script['component'] ) )
 					? self::inline_script_component()
 					: self::comp( self::g( $script, 'component' ), $url );
 				$ckey      = BLT_Optimized_Components::key( $component );
-				$trigger   = (string) self::g( $script, 'fn', '' );
+				$trigger   = self::s( $script, 'fn', '' );
 				if ( '' === $trigger ) {
 					// The invoker is often the script's own URL; the invoker type says more.
-					$invoker = (string) self::g( $script, 'invoker', '' );
-					$trigger = ( '' !== $invoker && ! preg_match( '#^https?://#i', $invoker ) ) ? $invoker : (string) self::g( $script, 'invokerType', '' );
+					$invoker = self::s( $script, 'invoker', '' );
+					$trigger = ( '' !== $invoker && ! preg_match( '#^https?://#i', $invoker ) ) ? $invoker : self::s( $script, 'invokerType', '' );
 				}
-				$skey      = ( '' !== $url ? self::path_key( $url ) : 'inline' ) . '|' . $trigger;
+				$skey = ( '' !== $url ? self::path_key( $url ) : 'inline' ) . '|' . $trigger;
 				if ( ! isset( $out[ $ckey ] ) ) {
 					$out[ $ckey ] = array(
 						'component' => $component,
@@ -4289,7 +4385,7 @@ class BLT_Optimized_Lab {
 						'scripts'   => array(),
 					);
 				}
-				$forced                  = (float) self::g( $script, 'forcedLayout', 0 );
+				$forced                  = self::n( $script, 'forcedLayout', 0 );
 				$out[ $ckey ]['total']  += $duration;
 				$out[ $ckey ]['forced'] += $forced;
 				if ( ! isset( $out[ $ckey ]['scripts'][ $skey ] ) ) {
@@ -4473,7 +4569,7 @@ class BLT_Optimized_Lab {
 			$poor    = $poor || 'poor' === $run['sum']['ratings']['tbt'];
 			$longest = 0.0;
 			foreach ( (array) self::g( $tbt, 'longTasks', array() ) as $task ) {
-				$longest = max( $longest, (float) self::g( $task, 'duration', 0 ) );
+				$longest = max( $longest, self::n( $task, 'duration', 0 ) );
 			}
 
 			$top = self::loaf_by_component( $run );
@@ -4501,7 +4597,7 @@ class BLT_Optimized_Lab {
 				$run['ref'],
 				self::device( $run['vp'] ),
 				self::fmt_ms( $run['sum']['tbt'] ),
-				number_format_i18n( (int) self::g( $tbt, 'count', 0 ) ),
+				number_format_i18n( self::i( $tbt, 'count', 0 ) ),
 				$longest > 0 ? self::fmt_ms( $longest ) : '–',
 				$names ? implode( ', ', $names ) : '–',
 			);
@@ -4592,10 +4688,10 @@ class BLT_Optimized_Lab {
 		$groups = array();
 		foreach ( $runs as $ri => $run ) {
 			foreach ( (array) self::g( $run['lab'], 'resources', array() ) as $resource ) {
-				if ( ! is_array( $resource ) || empty( $resource['url'] ) || 'font' !== (string) self::g( $resource, 'kind', self::kind_of( $resource ) ) ) {
+				if ( ! is_array( $resource ) || '' === self::s( $resource, 'url' ) || 'font' !== self::s( $resource, 'kind', self::kind_of( $resource ) ) ) {
 					continue;
 				}
-				$component = self::comp( self::g( $resource, 'component' ), $resource['url'] );
+				$component = self::comp( self::g( $resource, 'component' ), self::s( $resource, 'url' ) );
 				$ckey      = BLT_Optimized_Components::key( $component );
 				if ( ! isset( $groups[ $ckey ] ) ) {
 					$groups[ $ckey ] = array(
@@ -4609,9 +4705,9 @@ class BLT_Optimized_Lab {
 						'bytes' => 0,
 					);
 				}
-				if ( ! isset( $groups[ $ckey ]['runs'][ $ri ]['files'][ $resource['url'] ] ) ) {
-					$groups[ $ckey ]['runs'][ $ri ]['files'][ $resource['url'] ] = self::resource_size( $resource );
-					$groups[ $ckey ]['runs'][ $ri ]['bytes']                    += self::resource_size( $resource );
+				if ( ! isset( $groups[ $ckey ]['runs'][ $ri ]['files'][ self::s( $resource, 'url' ) ] ) ) {
+					$groups[ $ckey ]['runs'][ $ri ]['files'][ self::s( $resource, 'url' ) ] = self::resource_size( $resource );
+					$groups[ $ckey ]['runs'][ $ri ]['bytes']                               += self::resource_size( $resource );
 				}
 			}
 		}
@@ -4649,7 +4745,7 @@ class BLT_Optimized_Lab {
 
 		$rows = array();
 		foreach ( $group['runs'] as $ri => $entry ) {
-			$run   = $runs[ $ri ];
+			$run       = $runs[ $ri ];
 			$files_run = $entry['files'];
 			arsort( $files_run );
 			foreach ( array_slice( $files_run, 0, self::MAX_ROWS_PER_RUN, true ) as $url => $size ) {
@@ -4667,11 +4763,11 @@ class BLT_Optimized_Lab {
 		$display  = false;
 		foreach ( $ris as $ri ) {
 			foreach ( (array) self::g( $runs[ $ri ]['lab'], 'fonts', array() ) as $font ) {
-				if ( ! is_array( $font ) || empty( $font['family'] ) ) {
+				if ( ! is_array( $font ) || '' === self::s( $font, 'family' ) ) {
 					continue;
 				}
-				$families[ $font['family'] ] = true;
-				if ( in_array( (string) self::g( $font, 'display', '' ), array( '', 'auto', 'block' ), true ) ) {
+				$families[ self::s( $font, 'family' ) ] = true;
+				if ( in_array( self::s( $font, 'display', '' ), array( '', 'auto', 'block' ), true ) ) {
 					$display = true;
 				}
 			}
@@ -4749,12 +4845,12 @@ class BLT_Optimized_Lab {
 		$hosts = array();
 		foreach ( $runs as $ri => $run ) {
 			foreach ( (array) self::g( $run['lab'], 'resources', array() ) as $resource ) {
-				if ( ! is_array( $resource ) || empty( $resource['url'] ) ) {
+				if ( ! is_array( $resource ) || '' === self::s( $resource, 'url' ) ) {
 					continue;
 				}
-				$component = self::comp( self::g( $resource, 'component' ), $resource['url'] );
+				$component = self::comp( self::g( $resource, 'component' ), self::s( $resource, 'url' ) );
 				// Font files have their own finding (lab.fonts).
-				if ( 'external' !== $component['type'] || 'font' === (string) self::g( $resource, 'kind', self::kind_of( $resource ) ) ) {
+				if ( 'external' !== $component['type'] || 'font' === self::s( $resource, 'kind', self::kind_of( $resource ) ) ) {
 					continue;
 				}
 				$host = (string) $component['slug'];
@@ -4772,10 +4868,10 @@ class BLT_Optimized_Lab {
 						'blocking' => 0,
 					);
 				}
-				$entry             = &$hosts[ $host ]['runs'][ $ri ];
-				$entry['bytes']   += self::resource_size( $resource );
-				$entry['requests'] += 1;
-				$entry['blocking'] += ! empty( $resource['blocking'] ) ? 1 : 0;
+				$entry                   = &$hosts[ $host ]['runs'][ $ri ];
+				$entry['bytes']         += self::resource_size( $resource );
+				$entry['requests']      += 1;
+				$entry['blocking']      += ! empty( $resource['blocking'] ) ? 1 : 0;
 				$hosts[ $host ]['worst'] = max( $hosts[ $host ]['worst'], $entry['bytes'] );
 				unset( $entry );
 			}
@@ -4820,9 +4916,9 @@ class BLT_Optimized_Lab {
 		$requests  = 0;
 		$rows      = array();
 		foreach ( $group['runs'] as $ri => $entry ) {
-			$run       = $runs[ $ri ];
-			$requests  = max( $requests, $entry['requests'] );
-			$rows[]    = array(
+			$run      = $runs[ $ri ];
+			$requests = max( $requests, $entry['requests'] );
+			$rows[]   = array(
 				$run['ref'],
 				self::device( $run['vp'] ),
 				self::fmt_bytes( $entry['bytes'] ),
@@ -4986,10 +5082,10 @@ class BLT_Optimized_Lab {
 					$worst[ $metric ] = max( $worst[ $metric ], (float) $run['sum'][ $metric ] );
 				}
 			}
-			$seen_lcp = $seen_lcp || null !== $ratings['lcp'];
-			$seen_cls = $seen_cls || null !== $ratings['cls'];
+			$seen_lcp           = $seen_lcp || null !== $ratings['lcp'];
+			$seen_cls           = $seen_cls || null !== $ratings['cls'];
 			$pages[ $run['p'] ] = true;
-			$rows[]   = array(
+			$rows[]             = array(
 				$run['ref'],
 				self::device( $run['vp'] ),
 				null !== $run['sum']['lcp'] ? self::fmt_ms( $run['sum']['lcp'] ) : '–',

@@ -48,6 +48,13 @@ class BLT_Optimized_Tweaks {
 	const HANDLE_PATTERN = '/^[A-Za-z0-9_\-.\/]+$/';
 
 	/**
+	 * Whether the stored rules have been validated this request.
+	 *
+	 * @var bool
+	 */
+	private $rules_validated = false;
+
+	/**
 	 * Settings snapshot taken when the runtime hooks were registered.
 	 *
 	 * @var array
@@ -154,7 +161,30 @@ class BLT_Optimized_Tweaks {
 	 * @return array
 	 */
 	public static function get() {
-		$stored = get_option( self::OPTION, array() );
+		return self::normalized( get_option( self::OPTION, array() ) );
+	}
+
+	/**
+	 * Settings for the front-end runtime, read from the autoloaded options
+	 * WordPress has already loaded. get_option() on an option that does not
+	 * exist yet (a site that never saved Speed Tweaks) costs a database query
+	 * on every request; this never queries. persist() always autoloads the
+	 * option, so nothing is missed.
+	 *
+	 * @return array
+	 */
+	private static function runtime_settings() {
+		$all = wp_load_alloptions();
+		return self::normalized( isset( $all[ self::OPTION ] ) ? maybe_unserialize( $all[ self::OPTION ] ) : array() );
+	}
+
+	/**
+	 * Stored value merged over the defaults, key by key.
+	 *
+	 * @param mixed $stored Stored option value.
+	 * @return array
+	 */
+	private static function normalized( $stored ) {
 		$stored = is_array( $stored ) ? $stored : array();
 		$out    = array();
 
@@ -823,11 +853,11 @@ class BLT_Optimized_Tweaks {
 	 * posts are saved (and Heartbeat runs) in wp-admin and over REST.
 	 */
 	public function __construct() {
-		$o = self::get();
+		$o = self::runtime_settings();
 
-		// Runtime code relies on a well-formed rule list, so validate it once here.
-		$o['rules'] = empty( $o['rules'] ) ? array() : self::sanitize_rules( $o['rules'] );
-
+		// Rules are validated on first use (run_dequeues(), after `wp`), not
+		// here: validation errors are translated strings, and translating at
+		// plugins_loaded triggers WordPress's "loaded too early" notice.
 		$this->opts = $o;
 		$front      = ! is_admin();
 
@@ -866,7 +896,7 @@ class BLT_Optimized_Tweaks {
 
 		$has_rule = false;
 		foreach ( $o['rules'] as $rule ) {
-			if ( $rule['enabled'] ) {
+			if ( is_array( $rule ) && ! empty( $rule['enabled'] ) ) {
 				$has_rule = true;
 				break;
 			}
@@ -1031,6 +1061,11 @@ class BLT_Optimized_Tweaks {
 	public function run_dequeues() {
 		if ( ! did_action( 'wp' ) || self::bypassed() ) {
 			return;
+		}
+
+		if ( ! $this->rules_validated ) {
+			$this->opts['rules']   = self::sanitize_rules( $this->opts['rules'] );
+			$this->rules_validated = true;
 		}
 
 		$o       = $this->opts;
@@ -1209,6 +1244,33 @@ class BLT_Optimized_Tweaks {
 			}
 		}
 
+		/**
+		 * Post meta keys whose values count as page content for "content
+		 * contains" asset rules — page builders store layouts there, not in
+		 * post_content.
+		 *
+		 * @param string[] $keys Meta keys.
+		 * @param WP_Post  $post Queried post.
+		 */
+		$meta_keys = (array) apply_filters( 'blt_optimized_rule_meta_keys', array( '_elementor_data', '_bricks_page_content_2', 'ct_builder_shortcodes', 'ct_builder_json', '_fl_builder_data', 'tve_updated_post' ), $post );
+		foreach ( $meta_keys as $meta_key ) {
+			$value = get_post_meta( $id, (string) $meta_key, true );
+			if ( is_string( $value ) && '' !== $value ) {
+				$haystack .= "\n" . $value;
+			} elseif ( is_array( $value ) || is_object( $value ) ) {
+				$haystack .= "\n" . wp_json_encode( $value );
+			}
+		}
+
+		/**
+		 * Filter the text "content contains" asset-rule conditions search for
+		 * the queried post (post_content, synced patterns and builder meta).
+		 *
+		 * @param string  $haystack Text searched.
+		 * @param WP_Post $post     Queried post.
+		 */
+		$haystack = (string) apply_filters( 'blt_optimized_rule_haystack', $haystack, $post );
+
 		$this->haystack_cache[ $id ] = $haystack;
 		return $haystack;
 	}
@@ -1258,7 +1320,9 @@ class BLT_Optimized_Tweaks {
 		if ( $post instanceof WP_Post && ! post_type_supports( $post->post_type, 'revisions' ) ) {
 			return $num;
 		}
-		return $limit;
+		// A cap, never a raise: a stricter WP_POST_REVISIONS (or revisions
+		// switched off) wins. -1 means unlimited.
+		return ( (int) $num < 0 ) ? $limit : min( (int) $num, $limit );
 	}
 
 	/**

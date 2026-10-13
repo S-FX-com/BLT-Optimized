@@ -138,6 +138,10 @@ class BLT_Optimized_Profiler {
 		if ( ! isset( $_GET[ self::QUERY_ARG ] ) ) { // phpcs:ignore WordPress.Security.NonceVerification.Recommended -- the single-use token is the credential.
 			return;
 		}
+		$token = $_GET[ self::QUERY_ARG ]; // phpcs:ignore WordPress.Security.NonceVerification.Recommended, WordPress.Security.ValidatedSanitizedInput.InputNotSanitized, WordPress.Security.ValidatedSanitizedInput.MissingUnslash -- shape-checked only; the collector validates it fully.
+		if ( ! is_string( $token ) || 1 !== preg_match( '/^[A-Za-z0-9]{32}\z/', $token ) ) {
+			return;
+		}
 		// Only now is the collector (the bulk of the profiler) parsed.
 		require_once __DIR__ . '/class-blt-optimized-profiler-collector.php';
 		BLT_Optimized_Profiler_Collector::start();

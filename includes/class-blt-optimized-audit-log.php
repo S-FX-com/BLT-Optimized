@@ -88,7 +88,7 @@ class BLT_Optimized_Audit_Log {
 		header( 'Content-Disposition: attachment; filename="blt-optimized-audit-log-' . gmdate( 'Ymd-His' ) . '.csv"' );
 
 		$out = fopen( 'php://output', 'w' ); // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_fopen
-		fputcsv( $out, array( 'id', 'action', 'details', 'bytes_reclaimed', 'rows_affected', 'user_id', 'user_login', 'created_at_utc' ) );
+		fputcsv( $out, array( 'id', 'action', 'details', 'bytes_reclaimed', 'rows_affected', 'user_id', 'user_login', 'created_at_utc' ), ',', '"', '\\' );
 		foreach ( $entries as $entry ) {
 			$user = get_userdata( (int) $entry['user_id'] );
 			fputcsv(
@@ -102,7 +102,10 @@ class BLT_Optimized_Audit_Log {
 					$entry['user_id'],
 					$user ? $user->user_login : '',
 					$entry['created_at'],
-				)
+				),
+				',',
+				'"',
+				'\\'
 			);
 		}
 		fclose( $out ); // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_fclose

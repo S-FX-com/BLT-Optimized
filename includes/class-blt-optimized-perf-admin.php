@@ -918,7 +918,7 @@ class BLT_Optimized_Perf_Admin {
 		header( 'Content-Disposition: attachment; filename="blt-optimized-performance-' . gmdate( 'Ymd-His' ) . '.csv"' );
 
 		$out = fopen( 'php://output', 'w' ); // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_fopen
-		fputcsv( $out, array( 'severity', 'category', 'title', 'impact', 'component', 'where', 'summary', 'fix', 'dismissed', 'id' ) );
+		fputcsv( $out, array( 'severity', 'category', 'title', 'impact', 'component', 'where', 'summary', 'fix', 'dismissed', 'id' ), ',', '"', '\\' );
 		foreach ( $report ? (array) $report['findings'] : array() as $finding ) {
 			$row = array(
 				$finding['severity'],
@@ -932,7 +932,7 @@ class BLT_Optimized_Perf_Admin {
 				isset( $dismissed[ $finding['key'] ] ) ? 'yes' : '',
 				$finding['id'],
 			);
-			fputcsv( $out, array_map( array( $this, 'csv_cell' ), $row ) );
+			fputcsv( $out, array_map( array( $this, 'csv_cell' ), $row ), ',', '"', '\\' );
 		}
 		fclose( $out ); // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_fclose
 		exit;

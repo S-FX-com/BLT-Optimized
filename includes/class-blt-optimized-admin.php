@@ -744,7 +744,7 @@ class BLT_Optimized_Admin {
 		header( 'Content-Disposition: attachment; filename="blt-optimized-disk-scan-' . gmdate( 'Ymd-His' ) . '.csv"' );
 
 		$out = fopen( 'php://output', 'w' ); // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_fopen
-		fputcsv( $out, array( 'path', 'type', 'depth', 'size_bytes', 'size_human', 'file_count', 'flags', 'scanned_at_utc' ) );
+		fputcsv( $out, array( 'path', 'type', 'depth', 'size_bytes', 'size_human', 'file_count', 'flags', 'scanned_at_utc' ), ',', '"', '\\' );
 		foreach ( $rows as $row ) {
 			fputcsv(
 				$out,
@@ -757,7 +757,10 @@ class BLT_Optimized_Admin {
 					$row['file_count'],
 					$row['flags'],
 					$row['scanned_at'],
-				)
+				),
+				',',
+				'"',
+				'\\'
 			);
 		}
 		fclose( $out ); // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_fclose

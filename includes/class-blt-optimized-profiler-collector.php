@@ -848,7 +848,7 @@ class BLT_Optimized_Profiler_Collector extends BLT_Optimized_Profiler {
 			case E_USER_DEPRECATED:
 				$level = 'deprecated';
 				break;
-			case E_STRICT:
+			case 2048: // E_STRICT; the constant is deprecated as of PHP 8.4.
 				$level = 'strict';
 				break;
 			default:

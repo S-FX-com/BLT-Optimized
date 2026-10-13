@@ -6143,7 +6143,7 @@ class BLT_Optimized_Page_Findings {
 	 * @return bool
 	 */
 	private static function iframe_in_content( $src, $kind, $content ) {
-		$src = html_entity_decode( (string) $src );
+		$src = html_entity_decode( (string) $src, ENT_QUOTES | ENT_HTML5, 'UTF-8' );
 		if ( 'youtube' === $kind && preg_match( '#(?:embed/|v=|youtu\.be/|/vi/)([\w-]{6,})#', $src, $m ) ) {
 			return false !== strpos( $content, $m[1] );
 		}
